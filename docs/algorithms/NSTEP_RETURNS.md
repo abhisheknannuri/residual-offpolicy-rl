@@ -2,7 +2,7 @@
 
 This document explains **multi-step (n-step) TD returns** as used in the replay buffer's `MultiStepTransform`, with complete math, a worked example, and bias-variance analysis.
 
-Back to: [RESIDUAL_RL_TRAINING.md](RESIDUAL_RL_TRAINING.md)
+Back to: [../training/RESIDUAL_RL_TRAINING.md](../training/RESIDUAL_RL_TRAINING.md)
 
 ---
 
@@ -284,4 +284,4 @@ The training loop doesn't need to know about n-step — it's all handled by the 
 
 The assertion `assert cfg.num_envs == 1` exists because the `MultiStepTransform` maintains an internal buffer that assumes transitions arrive sequentially from a single environment. With multiple environments, transitions from different envs would be interleaved, corrupting the n-step computation.
 
-Back to: [RESIDUAL_RL_TRAINING.md](RESIDUAL_RL_TRAINING.md)
+Back to: [../training/RESIDUAL_RL_TRAINING.md](../training/RESIDUAL_RL_TRAINING.md)

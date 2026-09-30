@@ -49,7 +49,7 @@ collapses the annotation to a single choice:
 furthest_stage ∈ { none, 0, 1, 2, 3 }     # 3 == full success
 ```
 
-Rendered back out as the four `- [ ]`/`- [X]` columns for Notes.md. One keypress
+Rendered back out as the four `- [ ]`/`- [X]` columns for ../../docs/archive/Notes.md. One keypress
 (`0`–`4`, or `` ` `` for none) instead of four clicks, and it cannot produce an
 impossible row like "S3 done but S1 not".
 
@@ -307,7 +307,7 @@ holds per-tick data): `run_start`, `intervention_start`, `intervention_end`,
   --eval-root eval_runs --format markdown
 ```
 
-Emits **exactly the two tables already in Notes.md**, so output can be pasted
+Emits **exactly the two tables already in ../../docs/archive/Notes.md**, so output can be pasted
 straight back in:
 
 - **Checkpoint summary** — `Eval Done (20 Poses)`, per-sub-stage reached counts,
@@ -406,14 +406,14 @@ The per-run budget is still ~2 actions: click Stop (or let it time out), then
 5. Intervene mid-run → `assisted: true`, stage dropdown appears, run drops out of
    the headline rate but is counted.
 6. Kill the app with a review pending → `status="unreviewed"`, nothing lost.
-7. Run `eval_report.py` → paste into Notes.md, compare against a hand-filled row.
+7. Run `eval_report.py` → paste into ../../docs/archive/Notes.md, compare against a hand-filled row.
 
 ---
 
 ## 12. Decisions
 
-**Settled (from Notes.md + your reply):**
-- Stages: the 4 sub-stages verbatim from Notes.md.
+**Settled (from ../../docs/archive/Notes.md + your reply):**
+- Stages: the 4 sub-stages verbatim from ../../docs/archive/Notes.md.
 - Pose = cube placement (X, Y, yaw), 20 deterministic poses from seed 42;
   human places the cube, app tracks the cursor.
 - Annotation = **furthest sub-stage reached**, one keystroke; rendered back to
@@ -422,7 +422,7 @@ The per-run budget is still ~2 actions: click Stop (or let it time out), then
   excluded from the headline success rate. No live marking, no stage detection.
 - Soft discard; start blocked while a review is pending; shutdown finalizes
   `unreviewed`.
-- The app generates the Notes.md tables.
+- The app generates the ../../docs/archive/Notes.md tables.
 
 **Deliberately deferred:** automatic stage detection, and the post-run timeline
 (P4). Neither is needed for the 300 runs in front of you.

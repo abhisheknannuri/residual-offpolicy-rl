@@ -102,4 +102,4 @@ WANDB_PROJECT=resfit             # Default WandB project
 
 ---
 
-For more details, refer to the [DOCKER_SETUP.md](DOCKER_SETUP.md) and [REWARD_AND_SUCCESS.md](REWARD_AND_SUCCESS.md) files in the repository.
+For more details, refer to the [../setup/DOCKER_SETUP.md](../setup/DOCKER_SETUP.md) and [../rewards/REWARD_AND_SUCCESS.md](../rewards/REWARD_AND_SUCCESS.md) files in the repository.

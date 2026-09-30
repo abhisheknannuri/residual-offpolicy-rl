@@ -593,7 +593,7 @@ def api_start_inference():
     eval_hook = None
     if state.eval is not None:
         if max_steps is None:
-            max_steps = state.eval.config.max_steps_default  # Notes.md: 500
+            max_steps = state.eval.config.max_steps_default  # docs/archive/Notes.md: 500
         try:
             with state.lock:
                 eval_body = body.get("eval") or {}

@@ -189,7 +189,7 @@ git status --porcelain --untracked-files=all | grep -c '^??'   # want ~200, not 
 ```
 
 > One trade-off to be aware of, since you asked for `trossen_real/EVAL/` to be
-> ignored wholesale: that also excludes `Notes.md`, `placement_mat.pdf` and the
+> ignored wholesale: that also excludes `docs/archive/Notes.md`, `placement_mat.pdf` and the
 > pose configs - the *conclusions* of the eval campaign, not just its artifacts.
 > If you want those in git, the alternative is
 > `trossen_real/EVAL/*/*/runs/` + `trossen_real/EVAL/*/*/analysis/` (ignores the
@@ -229,7 +229,7 @@ this is a move *plus* a link rewrite, not a plain `mv`. Proposed:
 
 ```
 README.md  CONTRIBUTING.md  CODE_OF_CONDUCT.md     stay at root (GitHub convention)
-docs/overview/    ResFi-ResidualFine-tuningWithOff-PolicyRL.md
+docs/overview/    docs/overview/ResFi-ResidualFine-tuningWithOff-PolicyRL.md
 docs/algorithms/  TD3_ALGORITHM  RESIDUAL_LEARNING  CRITIC_LOSSES_EXPLAINED
                   NSTEP_RETURNS  VALUE_FUNCTION_AND_WARMUP  ORIGINAL_VS_IBRL_QAGENT
                   LAYERNORM_VS_GRADCLIP  ACTION_NORMALIZATION  REPLAY_BUFFERS
@@ -240,7 +240,7 @@ docs/rewards/     REWARD_AND_SUCCESS  REWARD_MODEL_INTEGRATION  STAGE_AWARE_REWA
 docs/data/        DATASET_GUIDE
 docs/setup/       UV_SERVER_SETUP  SETUP_FIXES  DOCKER_SETUP
 docs/real/        REAL_RESIDUAL_RL_HUMAN_INTERVENTION_PLAN
-docs/archive/     Notes.md  temp_notes.md
+docs/archive/     docs/archive/Notes.md  temp_notes.md
 ```
 
 `trossen_real/*.md` stay beside their code - docs that live next to what they

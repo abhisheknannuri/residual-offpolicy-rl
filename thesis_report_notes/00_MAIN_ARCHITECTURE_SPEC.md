@@ -212,7 +212,7 @@ has no knowledge of reward mode).
 
 **Streak-hysteresis gating — flag for the figure**: this is **not implemented anywhere
 in this repo**. `grep -rn "streak"` across all `.py` files returns zero hits. The
-detailed hysteresis pseudocode in `REWARD_MODEL_INTEGRATION.md` describes the
+detailed hysteresis pseudocode in `../docs/rewards/REWARD_MODEL_INTEGRATION.md` describes the
 **external** SARM/TCC server's presumed internal behavior — this repo's client only
 sends `hysteresis_k`/`conf_threshold`/`monotonic` as request parameters and receives an
 already-gated `gated_stage` back. Do not draw a hysteresis box inside the ResFiT
@@ -399,7 +399,7 @@ lower-confidence since I haven't read the full ResFiT text.
 | Item | Verdict | Basis |
 |---|---|---|
 | Stage-aware PBRS shaping | **Your own addition** | Abstract states the method needs only "sparse binary reward signals" — dense PBRS/SARM shaping is additive on top. The wrapper (`pbrs_wrapper.py`), the SARM/TCC HTTP client, and the two dedicated `*_sarm_stage_*.sh` scripts are all off-by-default in the two main per-task scripts. |
-| Streak-hysteresis gating | **Not in this repo at all** — not "yours" or "the paper's" as *code*; it's prose describing an external server's presumed behavior | `grep -rn "streak"` = 0 hits repo-wide. Described only in `REWARD_MODEL_INTEGRATION.md`'s prose about the external SARM/TCC service. |
+| Streak-hysteresis gating | **Not in this repo at all** — not "yours" or "the paper's" as *code*; it's prose describing an external server's presumed behavior | `grep -rn "streak"` = 0 hits repo-wide. Described only in `../docs/rewards/REWARD_MODEL_INTEGRATION.md`'s prose about the external SARM/TCC service. |
 | Per-dimension alpha (`action_scale`) | **Your own addition/experiment** | `Any`-typed field generic enough to take a scalar (used in 2 of 3 main scripts) or a list; the per-dim vector is only exercised in the sparse-Can script and the `*_listedResScale.sh` ablation round — reads as your own exploration, not a documented paper default. |
 | n-step=3 and 50/50 offline/online sampling | **Likely inherited from RLPD** (Ball et al., "Efficient Online RL with Offline Data"), which this file is literally named after (`rlpd.py`) and is known for exactly this symmetric-sampling recipe — **not independently confirmed against the ResFiT paper's own text** | Filename + the well-known RLPD design; abstract-only access to ResFiT itself. |
 | BC coefficient (`offline_rl_bc_alpha=0.2`) | **A deliberate deviation from a cited prior paper (TD3-BC), present in the base/committed code, not obviously your addition** | In-code comment: *"paper suggested value is 2.5 (but the bc loss is based on full action range not residual)"* — this describes adapting TD3-BC's alpha for the residual setting; whether this specific value was set by the ResFiT authors or tuned later is not determinable from the repo alone. |
@@ -456,12 +456,12 @@ lower-confidence since I haven't read the full ResFiT text.
 
 I don't have your Chapter 4 text to check directly — the items below are contradictions
 found between **the current code** and **this repo's own pre-existing analysis docs**
-(`RESIDUAL_LEARNING.md`, `ACT_ARCHITECTURE.md`, `RESIDUAL_RL_TRAINING.md`,
-`REWARD_MODEL_INTEGRATION.md`), which may be the same source your chapter draws from —
+(`../docs/algorithms/RESIDUAL_LEARNING.md`, `../docs/policies/ACT_ARCHITECTURE.md`, `../docs/training/RESIDUAL_RL_TRAINING.md`,
+`../docs/rewards/REWARD_MODEL_INTEGRATION.md`), which may be the same source your chapter draws from —
 worth cross-checking your text against these specifically:
 
-1. Composed action is stored **unclamped** in the buffer; `RESIDUAL_LEARNING.md` and
-   `CRITIC_LOSSES_EXPLAINED.md` both imply/state it's clamped there.
+1. Composed action is stored **unclamped** in the buffer; `../docs/algorithms/RESIDUAL_LEARNING.md` and
+   `../docs/algorithms/CRITIC_LOSSES_EXPLAINED.md` both imply/state it's clamped there.
 2. `action_scale` (α) is documented elsewhere as always scalar (`0.2`); it is actually a
    **7-D per-dimension vector** in the sparse-Can config and in the `listedResScale`
    ablations.
@@ -471,9 +471,9 @@ worth cross-checking your text against these specifically:
 4. Critic warmup and offline TD3-BC pretraining are described in places as compatible;
    they are **mutually exclusive** in code (offline-RL running disables warmup
    entirely, regardless of `critic_warmup_steps`'s value).
-5. `ACT_ARCHITECTURE.md`'s worked numeric example (token counts, state/action dims) is
+5. `../docs/policies/ACT_ARCHITECTURE.md`'s worked numeric example (token counts, state/action dims) is
    for **TwoArmCoffee/GR1** (3 cams, 36-D state, 24-D action), not Can (2 cams, 9-D
    state, 7-D action) — the architectural description transfers, the numbers don't.
-6. The streak-hysteresis mechanism in `REWARD_MODEL_INTEGRATION.md` reads as
+6. The streak-hysteresis mechanism in `../docs/rewards/REWARD_MODEL_INTEGRATION.md` reads as
    code-grounded but describes an **external, unverifiable-from-here** server, not
    anything implemented in this repo.

@@ -6,6 +6,10 @@ Website: https://residual-offpolicy-rl.github.io/
 
 Paper: https://arxiv.org/abs/2509.19301
 
+## Documentation
+
+Full docs are in **[docs/](docs/README.md)** - setup, the BC policy, the RL algorithms, training runbooks, rewards, datasets, and the real-robot stack.
+
 ## Getting Started
 
 ### Environment Setup

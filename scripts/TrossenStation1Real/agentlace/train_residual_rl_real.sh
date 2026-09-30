@@ -34,7 +34,7 @@ source "${_HERE}/common_dist.sh"
 # same TD3/RLPD algorithm, same QAgent/Actor/critic code, same replay-buffer
 # mixing - the ONLY thing that changes is where the environment comes from:
 # a real `TrossenResidualEnv` (trossen_real/rl/real_residual_env.py) instead
-# of a MuJoCo/dexmg vectorized sim. See REAL_RESIDUAL_RL_HUMAN_INTERVENTION_PLAN.md
+# of a MuJoCo/dexmg vectorized sim. See docs/real/REAL_RESIDUAL_RL_HUMAN_INTERVENTION_PLAN.md
 # (repo root) for the full design/implementation record.
 #
 # ┌─────────────────────────────────────────────────────────────────────────┐
@@ -176,7 +176,7 @@ MIN_STATE_STD=0.1
 # total_timesteps: MUCH smaller than sim - this is REAL wall-clock time.
 # At 20Hz, 20000 steps ≈ 1000s (~17 min) of env-stepping alone, before adding
 # gradient-update compute time on top (see the timing discussion in
-# REAL_RESIDUAL_RL_HUMAN_INTERVENTION_PLAN.md). Start small, scale up once
+# docs/real/REAL_RESIDUAL_RL_HUMAN_INTERVENTION_PLAN.md). Start small, scale up once
 # you've verified a short run works end-to-end.
 TOTAL_TIMESTEPS=75000
 #
@@ -257,7 +257,7 @@ OFFLINE_DATASET_ROOT="/home/qte9489/personal_abhi/temp/residual-offpolicy-rl/tro
 # use_base_policy_for_base_actions: true (default, matches your intent) -
 # queries the REMOTE policy_server.py (via env.policy) for each offline
 # dataset frame's base action, using FULL-RESOLUTION images, then resizes to
-# IMAGE_SIZE (§14) before storing - see REAL_RESIDUAL_RL_HUMAN_INTERVENTION_PLAN.md
+# IMAGE_SIZE (§14) before storing - see docs/real/REAL_RESIDUAL_RL_HUMAN_INTERVENTION_PLAN.md
 # for the full "offline buffer image-resolution / OOM fix" section. false =
 # GT-as-base (residual target always 0 for demo data) - simpler/faster to
 # populate but less consistent with online training.

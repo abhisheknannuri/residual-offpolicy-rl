@@ -47,7 +47,7 @@ class EvalStage:
 @dataclass(frozen=True)
 class EvalPose:
     """One cube placement. Units are centimetres/degrees, matching
-    `generate_eval_poses.py` and the printed sheet in Notes.md."""
+    `generate_eval_poses.py` and the printed sheet in docs/archive/Notes.md."""
 
     index: int  # 1-based, as printed ("Pose #07")
     x_cm: float

@@ -237,7 +237,7 @@ unclamped** `base_naction + residual_naction` sum — not the clamped value used
 step the environment. This is what flows into `_add_transitions_to_buffer(actions=combined_action, ...)`
 (`train_residual_td3.py:1830-1844`, and identically in the warmup loop at
 `train_residual_td3.py:1317-1332`), and ultimately becomes `batch["action"]` fed to
-`update_critic()`. `CRITIC_LOSSES_EXPLAINED.md` and `RESIDUAL_RL_TRAINING.md` both state or
+`update_critic()`. `../docs/algorithms/CRITIC_LOSSES_EXPLAINED.md` and `../docs/training/RESIDUAL_RL_TRAINING.md` both state or
 imply that the buffer stores `clamp(base+residual, -1, 1)`; **this is not what the current
 code does** — see "Discrepancies" section below.
 
@@ -802,10 +802,10 @@ while global_step <= cfg.algo.total_timesteps:
 
 ## Discrepancies with existing docs
 
-1. **Combined action stored in the replay buffer is UNCLAMPED, contrary to `RESIDUAL_LEARNING.md`
-   and `CRITIC_LOSSES_EXPLAINED.md`'s implicit assumption.** `RESIDUAL_LEARNING.md` (§3,
+1. **Combined action stored in the replay buffer is UNCLAMPED, contrary to `../docs/algorithms/RESIDUAL_LEARNING.md`
+   and `../docs/algorithms/CRITIC_LOSSES_EXPLAINED.md`'s implicit assumption.** `../docs/algorithms/RESIDUAL_LEARNING.md` (§3,
    "Clamping to [-1,1]") states the composed action `a_t = clip(a_base + a_res, -1, 1)` is
-   what's used throughout, and `ORIGINAL_VS_IBRL_QAGENT.md` §2 similarly claims
+   what's used throughout, and `../docs/algorithms/ORIGINAL_VS_IBRL_QAGENT.md` §2 similarly claims
    `info["scaled_action"] = combined_naction # ← clamp(base + residual, -1, 1)` (paraphrased,
    with a clamp implied). The **actual code** at `residual_env_wrapper.py:136-145` computes
    `combined_naction = base + residual` with **no clamp**, and it is this unclamped value that
@@ -817,7 +817,7 @@ while global_step <= cfg.algo.total_timesteps:
    (0.1–0.2, keeping sums well inside `[-1,1]` in the typical case) but is a genuine code-level
    inconsistency worth flagging precisely as such rather than assuming a clamp exists.
 
-2. **Actor gets updated every env step, not "every 4th step."** `RESIDUAL_RL_TRAINING.md`
+2. **Actor gets updated every env step, not "every 4th step."** `../docs/training/RESIDUAL_RL_TRAINING.md`
    §12 ("Step (4): Gradient Updates (UTD=4)") and §2's hyperparameter table both phrase this
    as "actor updated every 4th step," which reads as "once every 4 env steps." The actual
    behavior (`train_residual_td3.py:1967-1990`) is: **on every single env step**, 4 critic
@@ -825,7 +825,7 @@ while global_step <= cfg.algo.total_timesteps:
    once per env step too, just at 1/4 the frequency *of gradient calls* relative to the
    critic, not at 1/4 the frequency *of env steps*.
 
-3. **`RESIDUAL_LEARNING.md` §5 states `agent.actor.action_scale=0.2` is "the command-line
+3. **`../docs/algorithms/RESIDUAL_LEARNING.md` §5 states `agent.actor.action_scale=0.2` is "the command-line
    arg"** used generically; in fact the config **default** is `0.1`
    (`ResidualTD3DexmgConfig.agent.actor.action_scale`, `residual_td3.py:272`), and the actual
    value differs per script: `0.2` (Can dense), a **7-D per-dimension vector**
@@ -833,7 +833,7 @@ while global_step <= cfg.algo.total_timesteps:
    default). None of the docs mention that `action_scale` can be (and, in the sparse-Can
    ablation config, actually is) a per-dimension vector rather than a scalar.
 
-4. **`TD3_ALGORITHM.md`/`RESIDUAL_RL_TRAINING.md`'s "critic warmup" description doesn't
+4. **`../docs/algorithms/TD3_ALGORITHM.md`/`../docs/training/RESIDUAL_RL_TRAINING.md`'s "critic warmup" description doesn't
    mention it is mutually exclusive with the offline-RL (TD3-BC) phase.** Per
    `train_residual_td3.py:1719` (`if cfg.algo.critic_warmup_steps > 0 and not _is_resuming and
    not _did_offline_rl`), if `algo.train_offline_rl=True` (as in the sparse-Can main script and
@@ -841,7 +841,7 @@ while global_step <= cfg.algo.total_timesteps:
    entirely**, regardless of `critic_warmup_steps`'s configured value. The two "warm the
    critic up before the actor listens to it" mechanisms are alternatives, not both applied.
 
-5. **`ORIGINAL_VS_IBRL_QAGENT.md`'s comparison of `QAgent` vs `QAgent_ibrl` is accurate for
+5. **`../docs/algorithms/ORIGINAL_VS_IBRL_QAGENT.md`'s comparison of `QAgent` vs `QAgent_ibrl` is accurate for
    the `_act_default`/critic-training claims checked here** (verified against
    `q_agent.py:278-300,824` and `critic.py`) — no discrepancy found in that doc for the
    portions cross-checked against current `q_agent.py`/`critic.py`, though it was not the
@@ -850,7 +850,7 @@ while global_step <= cfg.algo.total_timesteps:
 6. **Actor-loss `stddev` is silently hardcoded to `0.0`** (`q_agent.py:429-432`, with an
    inline `# NOTE: This fix has not been fully verified yet.` comment) rather than using the
    schedule value passed into `update_actor(obs, stddev)`. None of the reviewed prior docs
-   mention this; `RESIDUAL_RL_TRAINING.md`'s pseudocode for "Actor Update" implies the actor
+   mention this; `../docs/training/RESIDUAL_RL_TRAINING.md`'s pseudocode for "Actor Update" implies the actor
    loss action uses the same stochastic sampling as elsewhere, omitting this hardcoded
    override.
 
@@ -864,7 +864,7 @@ while global_step <= cfg.algo.total_timesteps:
 ## Not investigated / out of scope for this pass
 
 - `resfit/rl_finetuning/off_policy/rl/ibrl_q_agent.py` was read only via the pre-existing
-  `ORIGINAL_VS_IBRL_QAGENT.md` doc, not independently re-verified line-by-line against current
+  `../docs/algorithms/ORIGINAL_VS_IBRL_QAGENT.md` doc, not independently re-verified line-by-line against current
   code in this pass (flagged in item 5 above).
 - `resfit/rl_finetuning/off_policy/rl/unified_buffer.py` (`EpochUnifiedDataset`, used only in
   the offline-RL phase, §9) was referenced by grep/usage-site only, not read in full — its

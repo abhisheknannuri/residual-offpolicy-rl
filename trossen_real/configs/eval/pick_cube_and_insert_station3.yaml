@@ -40,7 +40,7 @@ stages:
 # 6-10 etc, with no overlapping outlines on any page.
 poses_file: poses_station3_cube_20_stratified.json
 
-max_steps_default: 500      # Notes.md: "Max Steps: 500"
+max_steps_default: 500      # docs/archive/Notes.md: "Max Steps: 500"
 output_root: eval_runs
 
 operators: []               # optional allow-list; empty = free text

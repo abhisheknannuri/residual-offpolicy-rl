@@ -2,7 +2,7 @@
 
 This document explains **why** residual RL works, the **zero initialization** trick, **action scaling** math, and how the residual formulation makes RL training dramatically easier for robotics tasks.
 
-Back to: [RESIDUAL_RL_TRAINING.md](RESIDUAL_RL_TRAINING.md)
+Back to: [../training/RESIDUAL_RL_TRAINING.md](../training/RESIDUAL_RL_TRAINING.md)
 
 ---
 
@@ -839,4 +839,4 @@ The canonical example is `BasePolicyVecEnvWrapper` in [resfit/rl_finetuning/wrap
 4. **Reward modifications affect Q-value scale.** If you add dense reward, update `v_min`/`v_max` for distributional critics.
 5. **N-step returns.** Reward shaping wrappers interact with n-step return calculation. Make sure your modified rewards are compatible with the n-step buffer logic.
 
-Back to: [RESIDUAL_RL_TRAINING.md](RESIDUAL_RL_TRAINING.md)
+Back to: [../training/RESIDUAL_RL_TRAINING.md](../training/RESIDUAL_RL_TRAINING.md)

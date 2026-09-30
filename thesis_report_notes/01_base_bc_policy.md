@@ -117,7 +117,7 @@ holds both for the W&B-hosted path and for the local-checkpoint path the user as
    `resfit.dexmg.environments.dexmg.create_vectorized_env` / `VectorizedEnvWrapper` for
    rollouts. Same `ACTPolicy` class.
 
-### Confirms / corrects `REWARD_MODEL_INTEGRATION.md`
+### Confirms / corrects `../docs/rewards/REWARD_MODEL_INTEGRATION.md`
 
 `REWARD_MODEL_INTEGRATION.md:211` (repo root, an existing untracked doc from a prior
 session) claims local ACT-checkpoint loading was implemented via
@@ -133,7 +133,7 @@ as the doc describes.
 Ground-truth numbers below use the **actual checkpoint** the user has locally
 (`.../policy_rabc_100/checkpoints/025000/pretrained_model/config.json`, read in full in
 §C) mapped onto the sim `Can` task in `resfit/dexmg/environments/dexmg.py`. This
-supersedes the TwoArmCoffee/GR1 example numbers in the existing `ACT_ARCHITECTURE.md`
+supersedes the TwoArmCoffee/GR1 example numbers in the existing `../docs/policies/ACT_ARCHITECTURE.md`
 (see "Discrepancies" section — that doc's *numeric* walkthrough is for a different task,
 though its architectural description of the ACT module graph is otherwise accurate).
 
@@ -178,7 +178,7 @@ Using this checkpoint's hyperparameters: `n_obs_steps=1`, `chunk_size=20`,
    backbone, not per-camera).
    - Input per camera: `(B, 3, 84, 84)`.
    - Output: `(B, 512, 3, 3)` feature map (per the ResNet18 stride math for 84×84 input;
-     same math as `ACT_ARCHITECTURE.md` §3, which is architecture-correct even though its
+     same math as `../docs/policies/ACT_ARCHITECTURE.md` §3, which is architecture-correct even though its
      numeric example task differs).
 3. **Image token projection**: `Conv2d(512, 512, kernel_size=1)`
    (`encoder_img_feat_input_proj`, `modeling_act.py:442-443`) + 2D sinusoidal positional
@@ -451,7 +451,7 @@ never undone), and structurally excluded from all three RL optimizers
 
 ## Discrepancies with existing docs
 
-1. **`ACT_ARCHITECTURE.md` numeric example is for a different task than sim/CAN.**
+1. **`../docs/policies/ACT_ARCHITECTURE.md` numeric example is for a different task than sim/CAN.**
    The doc's "Complete Dimension Trace" (`ACT_ARCHITECTURE.md:497-552`) and running
    example throughout use **TwoArmCoffee / GR1 humanoid**: 3 cameras, 36D state, 24D
    action, 27 image tokens. The residual-RL Can checkpoint the user actually has locally
@@ -462,7 +462,7 @@ never undone), and structurally excluded from all three RL optimizers
    concrete tensor-shape numbers are task-specific and don't transfer to Can. Section B
    above gives the Can-specific numbers.
 
-2. **`REWARD_MODEL_INTEGRATION.md` — confirmed, not stale**, on the one point this task
+2. **`../docs/rewards/REWARD_MODEL_INTEGRATION.md` — confirmed, not stale**, on the one point this task
    asked about: the "local checkpoint takes priority over W&B" feature
    (`REWARD_MODEL_INTEGRATION.md:200, 211`) is fully implemented in the current
    (uncommitted) `resfit/lerobot/utils/load_policy.py` and
@@ -482,7 +482,7 @@ never undone), and structurally excluded from all three RL optimizers
    "Lift" framing are copy-paste artifacts, not accurate documentation of what the
    script actually runs.
 
-4. **`REWARD_MODEL_INTEGRATION.md`'s embedded prompt transcript (§1, informal notes, not
+4. **`../docs/rewards/REWARD_MODEL_INTEGRATION.md`'s embedded prompt transcript (§1, informal notes, not
    the doc's own authored claims)** asserts training happens in a single (non-vectorized)
    sim env, with vectorized envs used only for periodic eval. This is corroborated by the
    current code (`NUM_ENVS=1` in both shell scripts with comment `"training environments

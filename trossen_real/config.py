@@ -246,7 +246,7 @@ class StationConfig:
         # axis-angle+gripper the SDK/hil-serl use internally - see
         # `dataset_recorder.py::_to_sim_state()` for the conversion. This
         # lets a policy/normalizer trained on this repo's existing sim
-        # datasets (see RESIDUAL_LEARNING.md/BC_POLICY_TRAINING.md) load
+        # datasets (see docs/algorithms/RESIDUAL_LEARNING.md and docs/policies/BC_POLICY_TRAINING.md) load
         # real-hardware data recorded here without a dimension/representation
         # mismatch.
         return 9

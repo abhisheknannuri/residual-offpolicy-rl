@@ -14,7 +14,7 @@ the infer app; episode-boundary control needs neither a leader nor a policy
 and applies to both apps - a `PedalListener` used here does NOT require
 `enable_intervention`/a leader connection at all.
 
-Behavior (confirmed design, see `REAL_RESIDUAL_RL_HUMAN_INTERVENTION_PLAN.md`
+Behavior (confirmed design, see `docs/real/REAL_RESIDUAL_RL_HUMAN_INTERVENTION_PLAN.md`
 for the DIFFERENT semantics the real-hardware RL training env uses instead -
 this module is NOT used there and does not change it):
   - Reset pedal: a single press ends the current episode immediately - reuses

@@ -4,7 +4,7 @@ This document explains the **TD3 (Twin Delayed Deep Deterministic Policy Gradien
 
 **Reference**: [Fujimoto et al., 2018 — "Addressing Function Approximation Error in Actor-Critic Methods"](https://arxiv.org/abs/1802.09477)
 
-Back to: [RESIDUAL_RL_TRAINING.md](RESIDUAL_RL_TRAINING.md)
+Back to: [../training/RESIDUAL_RL_TRAINING.md](../training/RESIDUAL_RL_TRAINING.md)
 
 ---
 
@@ -354,4 +354,4 @@ soft_update_params(actor, actor_target, tau=0.005)
 | Exploration noise schedule | `utils.py` | `schedule()` |
 | TruncatedNormal sampling | `utils.py` | `TruncatedNormal.sample()` |
 
-Back to: [RESIDUAL_RL_TRAINING.md](RESIDUAL_RL_TRAINING.md)
+Back to: [../training/RESIDUAL_RL_TRAINING.md](../training/RESIDUAL_RL_TRAINING.md)

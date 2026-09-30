@@ -315,8 +315,8 @@ hil-serl's gym-env pattern (`TrossenWindowxAIEnv.step()`).
 | **observation.state** (recorded) | 9 | `[eef_pos(3), eef_quat(4), gripper_qpos(2)]` - converted from the internal 7D axis-angle format via `scipy.spatial.transform.Rotation.from_rotvec(...).as_quat()`. |
 
 Why the state gets converted but the action doesn't: this repo's
-sim-trained BC/RL pipeline (`RESIDUAL_LEARNING.md` §12,
-`BC_POLICY_TRAINING.md`) was built from robomimic/robosuite datasets whose
+sim-trained BC/RL pipeline (`../docs/algorithms/RESIDUAL_LEARNING.md` §12,
+`../docs/policies/BC_POLICY_TRAINING.md`) was built from robomimic/robosuite datasets whose
 `observation.state` is `robot0_eef_pos`(3) + `robot0_eef_quat`(4) +
 `robot0_gripper_qpos`(2) = 9D with a **quaternion** orientation - a
 policy/normalizer trained on that shape+representation can't be handed raw

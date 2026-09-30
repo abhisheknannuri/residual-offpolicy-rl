@@ -2,7 +2,7 @@
 
 This document explains the two normalization systems used in residual RL training: **ActionScaler** (min-max scaling to [-1, 1]) and **StateStandardizer** (z-score normalization). Includes complete formulas, code mapping, and a worked example with 3 action dimensions.
 
-Back to: [RESIDUAL_RL_TRAINING.md](RESIDUAL_RL_TRAINING.md)
+Back to: [../training/RESIDUAL_RL_TRAINING.md](../training/RESIDUAL_RL_TRAINING.md)
 
 ---
 
@@ -281,4 +281,4 @@ Used by Actor and Critic networks
 | States | `StateStandardizer.standardize()` | Every env step | `BasePolicyVecEnvWrapper._augment_obs()` |
 | Images | uint8 / 255.0 | During encoding | `QAgent._encode()` |
 
-Back to: [RESIDUAL_RL_TRAINING.md](RESIDUAL_RL_TRAINING.md)
+Back to: [../training/RESIDUAL_RL_TRAINING.md](../training/RESIDUAL_RL_TRAINING.md)

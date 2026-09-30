@@ -99,7 +99,7 @@ class EvalAnnotation:
 
     `furthest_stage` is the single piece of judgement the protocol needs: the
     highest sub-stage index completed, or `None` for 'reached none'. The four
-    `- [X]` columns in Notes.md are rendered FROM this - see `eval_report.py`.
+    `- [X]` columns in docs/archive/Notes.md are rendered FROM this - see `eval_report.py`.
     """
 
     furthest_stage: int | None = None

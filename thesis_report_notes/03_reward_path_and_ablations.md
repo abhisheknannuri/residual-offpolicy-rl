@@ -4,7 +4,7 @@ Repo: `residual-offpolicy-rl` (ResFiT). All line numbers verified against the
 working tree as of 2026-08-23 (branch `dev/abhi-resfit-setup`). Every claim
 below was re-checked directly against current code — this is not a
 reproduction of the prior docs, though it agrees with
-`STAGE_AWARE_REWARD_PIPELINE.md` almost everywhere (see "Discrepancies"
+`../docs/rewards/STAGE_AWARE_REWARD_PIPELINE.md` almost everywhere (see "Discrepancies"
 section for the few places checked separately).
 
 ---
@@ -286,7 +286,7 @@ the server already being told `monotonic=1`.
 **Streak-hysteresis gating**: grepped `resfit/rl_finetuning/` (all `.py`
 files) for `streak`, `hysteresis`, `gate`, `gating` (case-insensitive).
 - `streak`: **NOT FOUND** anywhere in the codebase (`.py`, `.md`, `.sh`)
-  except inside `REWARD_MODEL_INTEGRATION.md`'s own prose (see below).
+  except inside `../docs/rewards/REWARD_MODEL_INTEGRATION.md`'s own prose (see below).
 - `hysteresis`/`gating`: present only as (a) a client-side parameter
   `hysteresis_k` that is **sent to the server per request** and never
   interpreted client-side beyond being forwarded
@@ -500,24 +500,24 @@ final 5-seed confirmation).
 
 ## Discrepancies with existing docs
 
-1. **`REWARD_MODEL_INTEGRATION.md`'s hysteresis pseudocode is server-side,
+1. **`../docs/rewards/REWARD_MODEL_INTEGRATION.md`'s hysteresis pseudocode is server-side,
    unverifiable in-repo.** `REWARD_MODEL_INTEGRATION.md:319-372` presents a
    confident, specific Python-pseudocode explanation of a "running streak"
    hysteresis counter (`count_toward_next`, resets on any low-confidence
    frame, needs `hysteresis_k` consecutive votes to advance one stage). This
    repo contains **no implementation** of that logic — `grep -rn "streak"`
    across all `.py` files returns zero hits, and no file implements
-   `predict_stage`/`gated_stage` server-side. `STAGE_AWARE_REWARD_PIPELINE.md`
+   `predict_stage`/`gated_stage` server-side. `../docs/rewards/STAGE_AWARE_REWARD_PIPELINE.md`
    is explicit that it does not trace server internals; readers of
-   `REWARD_MODEL_INTEGRATION.md` alone could mistake its pseudocode for
-   traced code. Treat that section of `REWARD_MODEL_INTEGRATION.md` as an
+   `../docs/rewards/REWARD_MODEL_INTEGRATION.md` alone could mistake its pseudocode for
+   traced code. Treat that section of `../docs/rewards/REWARD_MODEL_INTEGRATION.md` as an
    explanation of an external service, not this repo's code.
-2. **`REWARD_AND_SUCCESS.md` (Feb 2026) predates the reward-model feature
+2. **`../docs/rewards/REWARD_AND_SUCCESS.md` (Feb 2026) predates the reward-model feature
    entirely** — it contains zero mentions of `reward_model`, `pbrs`,
    `milestone`, `SARM`, or `TCC` (grepped, no hits). It is stale for any
    reward-model question and was not otherwise used as a source in this
    report.
-3. **`STAGE_AWARE_REWARD_PIPELINE.md` — confirmed accurate**, including its
+3. **`../docs/rewards/STAGE_AWARE_REWARD_PIPELINE.md` — confirmed accurate**, including its
    line-number citations into `pbrs_wrapper.py`, `reward_client.py`,
    `residual_td3.py`, and `train_residual_td3.py`, and its correction that
    PBRS/milestone share one wrapper class. One addition beyond what it

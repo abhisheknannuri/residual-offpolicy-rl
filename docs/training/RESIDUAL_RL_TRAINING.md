@@ -1,8 +1,8 @@
 # Residual RL Training — Complete Deep Dive
 
-This document explains every aspect of the Residual RL (Reinforcement Learning) fine-tuning pipeline in this project. It follows the same structure as [BC_POLICY_TRAINING.md](BC_POLICY_TRAINING.md) — tracing from the training command through every file, function, parameter, and design decision.
+This document explains every aspect of the Residual RL (Reinforcement Learning) fine-tuning pipeline in this project. It follows the same structure as [../policies/BC_POLICY_TRAINING.md](../policies/BC_POLICY_TRAINING.md) — tracing from the training command through every file, function, parameter, and design decision.
 
-**Pre-requisite**: You must have a trained BC policy (see [BC_POLICY_TRAINING.md](BC_POLICY_TRAINING.md)) before running residual RL training. The BC policy is frozen and used as a "base" — the RL agent learns a small correction on top.
+**Pre-requisite**: You must have a trained BC policy (see [../policies/BC_POLICY_TRAINING.md](../policies/BC_POLICY_TRAINING.md)) before running residual RL training. The BC policy is frozen and used as a "base" — the RL agent learns a small correction on top.
 
 ---
 
@@ -29,13 +29,13 @@ This document explains every aspect of the Residual RL (Reinforcement Learning) 
 19. [Reward Flow, Critic Loss Types, and v_min/v_max](#19-reward-flow-critic-loss-types-and-v_minv_max)
 
 **Concept Deep-Dive Documents** (linked inline):
-- [TD3_ALGORITHM.md](TD3_ALGORITHM.md) — Twin Delayed DDPG with math + examples
-- [NSTEP_RETURNS.md](NSTEP_RETURNS.md) — Multi-step TD learning with numerical walkthrough
-- [REPLAY_BUFFERS.md](REPLAY_BUFFERS.md) — Prioritized replay, online/offline mixing, prefetching
-- [RESIDUAL_LEARNING.md](RESIDUAL_LEARNING.md) — Why residual RL works, zero initialization, action scaling
-- [ACTION_NORMALIZATION.md](ACTION_NORMALIZATION.md) — ActionScaler + StateStandardizer with worked examples
+- [../algorithms/TD3_ALGORITHM.md](../algorithms/TD3_ALGORITHM.md) — Twin Delayed DDPG with math + examples
+- [../algorithms/NSTEP_RETURNS.md](../algorithms/NSTEP_RETURNS.md) — Multi-step TD learning with numerical walkthrough
+- [../algorithms/REPLAY_BUFFERS.md](../algorithms/REPLAY_BUFFERS.md) — Prioritized replay, online/offline mixing, prefetching
+- [../algorithms/RESIDUAL_LEARNING.md](../algorithms/RESIDUAL_LEARNING.md) — Why residual RL works, zero initialization, action scaling
+- [../algorithms/ACTION_NORMALIZATION.md](../algorithms/ACTION_NORMALIZATION.md) — ActionScaler + StateStandardizer with worked examples
 - [CHECKPOINTING_AND_RESUME.md](CHECKPOINTING_AND_RESUME.md) — Checkpointing, resume, RL vision encoder, buffer lifecycle, memory budget
-- [REWARD_AND_SUCCESS.md](REWARD_AND_SUCCESS.md) — Reward signal, success criteria for all 12 tasks, n-step returns, eval metrics
+- [../rewards/REWARD_AND_SUCCESS.md](../rewards/REWARD_AND_SUCCESS.md) — Reward signal, success criteria for all 12 tasks, n-step returns, eval metrics
 
 ---
 
@@ -52,7 +52,7 @@ The key insight: the BC policy already knows roughly what to do. The residual on
 
 > **Clarification: "initialized to output zero" means weight initialization, NOT a runtime override.** The last layer's weights and biases are set to exactly 0.0 via `nn.init.normal_(weight, mean=0, std=0)`. Since the network ends with `Linear → Tanh` and `tanh(0) = 0`, the output is zero at initialization. From the very first training step, the actor is free to learn nonzero outputs — there is no "override phase" that holds the residual at zero for some steps and then releases it. The `action_scale` keeps outputs small, and the extremely low learning rate (`1e-6`) ensures the residual drifts away from zero gradually.
 
-See [RESIDUAL_LEARNING.md](RESIDUAL_LEARNING.md) for the full mathematical motivation, zero-initialization trick, and worked examples.
+See [../algorithms/RESIDUAL_LEARNING.md](../algorithms/RESIDUAL_LEARNING.md) for the full mathematical motivation, zero-initialization trick, and worked examples.
 
 ### Algorithm: TD3 + RLPD Recipe (Hybrid)
 
@@ -71,7 +71,7 @@ And further additions from other works:
 
 So it's accurate to call it "**Residual TD3 with RLPD-style training recipe**" — the paper refers to the overall approach as RLPD, but the underlying RL algorithm is TD3.
 
-See [TD3_ALGORITHM.md](TD3_ALGORITHM.md) for the complete algorithm with math, pseudocode, and examples.
+See [../algorithms/TD3_ALGORITHM.md](../algorithms/TD3_ALGORITHM.md) for the complete algorithm with math, pseudocode, and examples.
 
 ---
 
@@ -123,7 +123,7 @@ Unlike the BC training script (which uses argparse), the RL training uses **Hydr
 | `algo.buffer_size` | 200,000 | 300,000 | Online replay buffer capacity. |
 | `algo.learning_starts` | 10,000 | 10,000 | Collect this many transitions before training starts (warmup). |
 | `algo.gamma` | 0.99 | 0.995 | Discount factor. Higher value → agent cares more about future rewards. |
-| `algo.n_step` | 3 | 5 | N-step return horizon. See [NSTEP_RETURNS.md](NSTEP_RETURNS.md). |
+| `algo.n_step` | 3 | 5 | N-step return horizon. See [../algorithms/NSTEP_RETURNS.md](../algorithms/NSTEP_RETURNS.md). |
 | `algo.num_updates_per_iteration` | 4 | 4 | Gradient updates per env step (UTD ratio). Critic updated all 4 times; actor updated once. |
 | `algo.actor_updates_per_iteration` | 1 | 1 | Actor updates per iteration cycle. With UTD=4, actor updates every 4th step. |
 | `algo.update_every_n_steps` | 1 | 1 | Env steps between gradient update cycles. |
@@ -315,7 +315,7 @@ This prevents any state contamination between training and evaluation (the ACT p
 
 All actions and states are normalized before being used by the RL agent. This is critical because raw action dimensions can have vastly different ranges (e.g., joint angles in radians vs gripper 0/1).
 
-See [ACTION_NORMALIZATION.md](ACTION_NORMALIZATION.md) for the complete mathematical treatment with worked examples.
+See [../algorithms/ACTION_NORMALIZATION.md](../algorithms/ACTION_NORMALIZATION.md) for the complete mathematical treatment with worked examples.
 
 ### ActionScaler — Min-Max to [-1, 1]
 
@@ -619,7 +619,7 @@ The 10 heads share the spatial trunk but have **completely independent MLP weigh
 - **Target Q-value** (for TD target): Min over 2 random heads from the 10
 - **Actor gradient** (for policy improvement): Mean over all 10 heads
 
-See [TD3_ALGORITHM.md](TD3_ALGORITHM.md) for why this ensemble structure helps.
+See [../algorithms/TD3_ALGORITHM.md](../algorithms/TD3_ALGORITHM.md) for why this ensemble structure helps.
 
 ---
 
@@ -636,9 +636,9 @@ Two separate replay buffers store transitions for training:
 
 Every training batch is 50% online, 50% offline (`offline_fraction=0.5`).
 
-Both use `TensorDictPrioritizedReplayBuffer` from TorchRL, with a `MultiStepTransform` that automatically computes n-step returns (see [NSTEP_RETURNS.md](NSTEP_RETURNS.md)).
+Both use `TensorDictPrioritizedReplayBuffer` from TorchRL, with a `MultiStepTransform` that automatically computes n-step returns (see [../algorithms/NSTEP_RETURNS.md](../algorithms/NSTEP_RETURNS.md)).
 
-See [REPLAY_BUFFERS.md](REPLAY_BUFFERS.md) for the full deep dive on prioritized replay, caching, and prefetching.
+See [../algorithms/REPLAY_BUFFERS.md](../algorithms/REPLAY_BUFFERS.md) for the full deep dive on prioritized replay, caching, and prefetching.
 
 ### Transition Format (TensorDict)
 
@@ -836,7 +836,7 @@ This means the critic gets 4× more gradient updates than the actor — a key TD
 
 **File**: `resfit/rl_finetuning/off_policy/rl/q_agent.py`, `update_critic()` (lines 302–440)
 
-See [TD3_ALGORITHM.md](TD3_ALGORITHM.md) for the full mathematical derivation.
+See [../algorithms/TD3_ALGORITHM.md](../algorithms/TD3_ALGORITHM.md) for the full mathematical derivation.
 
 ### Step-by-Step Walkthrough
 
@@ -1279,10 +1279,10 @@ If `v_max` is too small, the distributional critic **cannot represent** Q-values
 ---
 
 **Concept deep-dive documents:**
-- [TD3_ALGORITHM.md](TD3_ALGORITHM.md) — Full TD3 algorithm with math, pseudocode, and worked example
-- [NSTEP_RETURNS.md](NSTEP_RETURNS.md) — Multi-step returns with numerical walkthrough
-- [REPLAY_BUFFERS.md](REPLAY_BUFFERS.md) — Online/offline mixing, PER, prefetching, caching
-- [RESIDUAL_LEARNING.md](RESIDUAL_LEARNING.md) — Why residual RL, zero init, action scaling math
-- [ACTION_NORMALIZATION.md](ACTION_NORMALIZATION.md) — ActionScaler and StateStandardizer formulas + examples
+- [../algorithms/TD3_ALGORITHM.md](../algorithms/TD3_ALGORITHM.md) — Full TD3 algorithm with math, pseudocode, and worked example
+- [../algorithms/NSTEP_RETURNS.md](../algorithms/NSTEP_RETURNS.md) — Multi-step returns with numerical walkthrough
+- [../algorithms/REPLAY_BUFFERS.md](../algorithms/REPLAY_BUFFERS.md) — Online/offline mixing, PER, prefetching, caching
+- [../algorithms/RESIDUAL_LEARNING.md](../algorithms/RESIDUAL_LEARNING.md) — Why residual RL, zero init, action scaling math
+- [../algorithms/ACTION_NORMALIZATION.md](../algorithms/ACTION_NORMALIZATION.md) — ActionScaler and StateStandardizer formulas + examples
 - [CHECKPOINTING_AND_RESUME.md](CHECKPOINTING_AND_RESUME.md) — Checkpointing, resume, RL vision encoder, buffer lifecycle, memory budget
-- [REWARD_AND_SUCCESS.md](REWARD_AND_SUCCESS.md) — Reward signal, success criteria for all 12 tasks, n-step returns, eval metrics
+- [../rewards/REWARD_AND_SUCCESS.md](../rewards/REWARD_AND_SUCCESS.md) — Reward signal, success criteria for all 12 tasks, n-step returns, eval metrics

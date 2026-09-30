@@ -244,7 +244,7 @@ class ResidualTD3DexmgConfig(RLPDDexmgConfig):
     # ------------------------------------------------------------------
     # When True, `get_envs()` connects to the REAL Trossen station instead of
     # building a MuJoCo/dexmg vectorized sim env - see
-    # `REAL_RESIDUAL_RL_HUMAN_INTERVENTION_PLAN.md` (repo root) for the full
+    # `docs/real/REAL_RESIDUAL_RL_HUMAN_INTERVENTION_PLAN.md` for the full
     # design. `num_envs`/`eval_num_envs` are forced to 1 in this mode
     # (asserted in `main()`); periodic evaluation is skipped entirely (see
     # `eval_interval_every_steps` handling in the training loop) - real
@@ -430,7 +430,7 @@ class ResidualTD3SquareConfig(ResidualTD3DexmgConfig):
 class ResidualTD3TrossenRealConfig(ResidualTD3DexmgConfig):
     """Real-hardware, single-station Trossen residual RL config. Points
     `get_envs()` at `TrossenResidualEnv` instead of a MuJoCo/dexmg vectorized
-    sim env - see REAL_RESIDUAL_RL_HUMAN_INTERVENTION_PLAN.md (repo root)."""
+    sim env - see docs/real/REAL_RESIDUAL_RL_HUMAN_INTERVENTION_PLAN.md."""
 
     task: str = "trossen_real"
     real_hardware: bool = True

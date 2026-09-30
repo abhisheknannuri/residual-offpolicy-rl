@@ -120,7 +120,7 @@ All environments below use **MuJoCo** as the physics engine, through robosuite. 
 
 ## 3. Gradient Clipping — What It Actually Is
 
-**Gradient clipping is NOT layer normalization.** They are completely different operations at different stages of the pipeline. For a full numerical walkthrough with exact arithmetic on a concrete MLP, see [LAYERNORM_VS_GRADCLIP.md](LAYERNORM_VS_GRADCLIP.md).
+**Gradient clipping is NOT layer normalization.** They are completely different operations at different stages of the pipeline. For a full numerical walkthrough with exact arithmetic on a concrete MLP, see [../algorithms/LAYERNORM_VS_GRADCLIP.md](../algorithms/LAYERNORM_VS_GRADCLIP.md).
 
 | Property | Layer Normalization | Gradient Clipping (`grad_clip_norm`) |
 |---|---|---|
@@ -959,7 +959,7 @@ If these don't match, BC eval rollouts and RL training will crash or silently us
 
 ### Step-by-Step: Upgrade Lift to 16D
 
-See the detailed recipe in [RESIDUAL_LEARNING.md](RESIDUAL_LEARNING.md#12-state-composition-and-how-to-change-it) — the process is identical for BC and RL.
+See the detailed recipe in [../algorithms/RESIDUAL_LEARNING.md](../algorithms/RESIDUAL_LEARNING.md#12-state-composition-and-how-to-change-it) — the process is identical for BC and RL.
 
 **Summary:**
 1. Edit `get_expected_low_dim_keys()` in the conversion script — add `"robot0_joint_pos"` (7D)

@@ -14,7 +14,7 @@ only ever ONE real station) so `train_residual_td3.py`'s existing
 `_add_transitions_to_buffer()` / `agent.act()` / `agent.update()` /
 checkpointing / wandb logging code paths all consume it with ZERO changes.
 
-Design doc: `REAL_RESIDUAL_RL_HUMAN_INTERVENTION_PLAN.md` (repo root).
+Design doc: `docs/real/REAL_RESIDUAL_RL_HUMAN_INTERVENTION_PLAN.md`.
 
 Optional human-intervention takeover (leader + foot pedal), reusing Phase
 1's `InterventionManager` as-is:

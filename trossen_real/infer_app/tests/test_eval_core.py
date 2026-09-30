@@ -325,7 +325,7 @@ def test_pose_sheet_ticks_only_the_furthest_stage():
     assert lines["01"] == "| 01 | - [ ] | - [ ] | - [X] | - [ ] | 500 | Fail |  |", lines["01"]
     assert lines["02"] == "| 02 | - [ ] | - [ ] | - [ ] | - [X] | 314 | Pass |  |", lines["02"]
     assert "| 03 | - [ ] | - [ ] | - [ ] | - [ ] |  |  |  |" in sheet, "unrun poses stay blank"
-    print("  pose sheet reproduces the Notes.md row format exactly")
+    print("  pose sheet reproduces the docs/archive/Notes.md row format exactly")
 
 
 def test_summary_counts_are_cumulative_and_medians_right():

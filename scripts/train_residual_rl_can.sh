@@ -604,7 +604,7 @@ WANDB_MODE="online"         # "online", "offline", "disabled"
 # seed: random seed for reproducibility
 # If empty → auto-generated random seed (logged in run name)
 # Seeds: python random, np.random, torch, torch.cuda
-# NOTE: robosuite env seeding is incomplete — see Notes.md for details.
+# NOTE: robosuite env seeding is incomplete — see docs/archive/Notes.md for details.
 SEED="42"
 #
 # torch_deterministic: set torch.backends.cudnn.deterministic

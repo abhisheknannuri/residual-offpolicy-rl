@@ -6,7 +6,7 @@ how the real-hardware (Trossen arm) residual-RL pipeline plugs into the same
 `train_residual_td3.py` / `QAgent` / replay-buffer machinery, and exactly
 where it differs.
 
-Primary source consulted first: `REAL_RESIDUAL_RL_HUMAN_INTERVENTION_PLAN.md`
+Primary source consulted first: `../docs/real/REAL_RESIDUAL_RL_HUMAN_INTERVENTION_PLAN.md`
 (repo root, dated 2026-08-13). Every claim below was re-verified against the
 current code as of this writing (2026-08-23); where current code has moved
 past that document, this doc says so explicitly and cites the newer code.
@@ -402,9 +402,9 @@ gets *executed* and *stored*:
 
 ---
 
-## 8. `UV_SERVER_SETUP.md`: relevance to the real-hardware stack
+## 8. `../docs/setup/UV_SERVER_SETUP.md`: relevance to the real-hardware stack
 
-`UV_SERVER_SETUP.md` (repo root) is a hand-off guide for building this
+`../docs/setup/UV_SERVER_SETUP.md` is a hand-off guide for building this
 repo's **`.venv`** via `uv` on a fresh server — it covers `torchrl` built
 from source against torch 2.11+cu128 (§2), headless MuJoCo/robosuite
 rendering via `MUJOCO_GL=egl`/`osmesa` (§3), and a troubleshooting table of

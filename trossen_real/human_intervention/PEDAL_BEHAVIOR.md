@@ -104,7 +104,7 @@ semantics don't get confused with the two apps above:
   the reward pedal straight through a reset can leak `reward=1` into the
   new episode's first step(s) if not released in time — `reset()` warns
   about this after the settle window (see
-  `REAL_RESIDUAL_RL_HUMAN_INTERVENTION_PLAN.md` §Reward/reset pedal timing
+  `../../docs/real/REAL_RESIDUAL_RL_HUMAN_INTERVENTION_PLAN.md` §Reward/reset pedal timing
   bugs found and fixed).
 - **Intervention**: identical mechanism to the infer app
   (`InterventionManager`, shared code), but the stored action for an

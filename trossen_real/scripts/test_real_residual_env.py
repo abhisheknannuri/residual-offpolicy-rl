@@ -46,7 +46,7 @@ Suggested manual test sequence (do these one at a time, rerunning as needed):
   3. Press+release the REWARD pedal as fast as possible, timed to land
      inside a single control tick - confirm that step's printed reward is
      still 1.0 (this is the press-inside-one-tick latch fix; see
-     REAL_RESIDUAL_RL_HUMAN_INTERVENTION_PLAN.md).
+     docs/real/REAL_RESIDUAL_RL_HUMAN_INTERVENTION_PLAN.md).
   4. Press the RESET pedal - confirm the CURRENT episode ends
      (terminated=True printed on that step), then a fresh reset (staged
      position + configured settle time) happens automatically before the

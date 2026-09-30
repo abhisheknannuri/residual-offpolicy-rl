@@ -559,7 +559,7 @@ Without the BC base policy and offline demonstrations, sparse reward with these 
 ---
 
 **Related documents:**
-- [RESIDUAL_RL_TRAINING.md](RESIDUAL_RL_TRAINING.md) — Full training pipeline walkthrough
-- [NSTEP_RETURNS.md](NSTEP_RETURNS.md) — Multi-step TD learning with numerical walkthrough
-- [CHECKPOINTING_AND_RESUME.md](CHECKPOINTING_AND_RESUME.md) — What gets saved, buffer lifecycle, memory budget
-- [TD3_ALGORITHM.md](TD3_ALGORITHM.md) — Critic update with Bellman targets
+- [../training/RESIDUAL_RL_TRAINING.md](../training/RESIDUAL_RL_TRAINING.md) — Full training pipeline walkthrough
+- [../algorithms/NSTEP_RETURNS.md](../algorithms/NSTEP_RETURNS.md) — Multi-step TD learning with numerical walkthrough
+- [../training/CHECKPOINTING_AND_RESUME.md](../training/CHECKPOINTING_AND_RESUME.md) — What gets saved, buffer lifecycle, memory budget
+- [../algorithms/TD3_ALGORITHM.md](../algorithms/TD3_ALGORITHM.md) — Critic update with Bellman targets

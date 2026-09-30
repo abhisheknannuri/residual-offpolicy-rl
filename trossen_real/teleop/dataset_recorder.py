@@ -61,7 +61,7 @@ def _to_sim_state(config: StationConfig, raw_state: np.ndarray) -> np.ndarray:
     (`trossen_windowxai.py::_get_obs()`) does NOT convert - it uses the raw
     axis-angle pose directly as `tcp_pose`. But THIS repo's sim-trained
     BC/RL pipeline (`resfit/lerobot/dataset/convert_robomimic_to_lerobot.py`,
-    `RESIDUAL_LEARNING.md` §12) was built from robomimic/robosuite datasets
+    `docs/algorithms/RESIDUAL_LEARNING.md` §12) was built from robomimic/robosuite datasets
     whose `observation.state` is `robot0_eef_pos`(3) + `robot0_eef_quat`(4) +
     `robot0_gripper_qpos`(2) = 9D, with a quaternion orientation - a policy/
     normalizer trained on that expects exactly this shape and

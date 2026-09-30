@@ -73,7 +73,7 @@ class PedalListener:
         # a press-then-release that happens ENTIRELY within a single tick's
         # ~50-100ms window must still count as reward=1 for that transition,
         # not be silently missed because the level was back to 0 by the time we
-        # checked. See REAL_RESIDUAL_RL_HUMAN_INTERVENTION_PLAN.md.
+        # checked. See docs/real/REAL_RESIDUAL_RL_HUMAN_INTERVENTION_PLAN.md.
         self._reward_latch = False
         
         # Try to open the device

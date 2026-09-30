@@ -2,7 +2,7 @@
 
 This document explains the replay buffer architecture used in residual RL training: online vs offline buffers, prioritized experience replay (PER), n-step transforms, caching to disk, and prefetching.
 
-Back to: [RESIDUAL_RL_TRAINING.md](RESIDUAL_RL_TRAINING.md)
+Back to: [../training/RESIDUAL_RL_TRAINING.md](../training/RESIDUAL_RL_TRAINING.md)
 
 ---
 
@@ -327,4 +327,4 @@ Each transition stores **two** observations (current + next), so the savings are
 
 The conversion is lossless for pixel values (which are inherently 0–255 integers).
 
-Back to: [RESIDUAL_RL_TRAINING.md](RESIDUAL_RL_TRAINING.md)
+Back to: [../training/RESIDUAL_RL_TRAINING.md](../training/RESIDUAL_RL_TRAINING.md)

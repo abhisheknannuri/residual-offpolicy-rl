@@ -1,6 +1,6 @@
 # Checkpointing, Resume & Buffer Lifecycle
 
-This document covers checkpointing and resume for the **Residual RL training** stage (`train_residual_td3.py`). For BC policy training checkpointing, see [BC_POLICY_TRAINING.md](BC_POLICY_TRAINING.md).
+This document covers checkpointing and resume for the **Residual RL training** stage (`train_residual_td3.py`). For BC policy training checkpointing, see [../policies/BC_POLICY_TRAINING.md](../policies/BC_POLICY_TRAINING.md).
 
 ---
 
@@ -541,5 +541,5 @@ The `Agg` backend renders to in-memory buffers and files without any GUI toolkit
 
 **Related documents:**
 - [RESIDUAL_RL_TRAINING.md](RESIDUAL_RL_TRAINING.md) — Full training pipeline walkthrough
-- [REPLAY_BUFFERS.md](REPLAY_BUFFERS.md) — Prioritized replay, online/offline mixing, prefetching
-- [RESIDUAL_LEARNING.md](RESIDUAL_LEARNING.md) — Why residual RL works, zero initialization, action scaling
+- [../algorithms/REPLAY_BUFFERS.md](../algorithms/REPLAY_BUFFERS.md) — Prioritized replay, online/offline mixing, prefetching
+- [../algorithms/RESIDUAL_LEARNING.md](../algorithms/RESIDUAL_LEARNING.md) — Why residual RL works, zero initialization, action scaling
