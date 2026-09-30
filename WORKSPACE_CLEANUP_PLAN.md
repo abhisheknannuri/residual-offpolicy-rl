@@ -1,8 +1,19 @@
 # Workspace audit + cleanup plan
 
-Updated 2026-09-30 after your corrections. **Executed so far: only the root junk
-deletion in §5.1** (copies archived first). Nothing else has been moved, staged,
-committed or pushed.
+Updated 2026-09-30. **Status: §5.1-§5.4 are DONE and committed locally.
+NOTHING HAS BEEN PUSHED.** Two commits sit on `dev/abhi-resfit-setup` ahead of
+`origin`:
+
+```
+5c1cbd0  Add trossen_real: the real-robot stack                  (89 files, 1.2 MB)
+a829378  Ignore vendored clones and recorded data; pin dependencies
+```
+
+Remaining: §5.5 docs move, §6-§7 the uv environment work.
+
+Safety net in place: branch `backup/pre-cleanup-20260930`, tarball
+`~/workspace_code_backup_20260930.tar.gz` (41 MB), and every deleted file copied
+to `~/resfit_bak_archive/root_junk_20260930/`.
 
 ---
 
@@ -98,23 +109,34 @@ fix. It gets committed and pushed to `origin dev/abhi-resfit-setup` in §5.4.
 
 ### 5.1 Junk at the repo root - **DONE**
 
-Deleted, after copying each non-empty one to
-`~/resfit_bak_archive/root_junk_20260930/`:
+Every file below was copied to `~/resfit_bak_archive/root_junk_20260930/` before
+deletion. Nothing was lost.
 
 | file | what it was |
 |---|---|
 | `ts` | captured `help()` output for `set_cartesian_positions` |
 | `hutil`, `t_client()` | captured `less` help screens |
-| `sen_arm,` , `t.mock` , `tatus` | empty - broken shell quoting |
+| `sen_arm, pydoc` | captured `pydoc` output for `TrossenArmDriver.configure` |
+| `t.mock import MagicMock` | captured `less` help screen |
+| `tatus --short teleop_client` | captured `less` help screen |
 | `output.log` | a stray July run log |
 | `.gitignore.20260901_113118.bak` | superseded |
+| `camera_*.png` (5), `q_traj_50000.png` | stray debug images |
+| `info.json`, `temp_notes.md` | stray scratch files |
 
-Left alone for you to judge: `camera_*.png` (5), `q_traj_50000.png`, `info.json`,
-`scratch.py`, `temp_notes.md`, `inspect_lerobot.py`, `test_omegaconf.py`.
+> The last three in that list had **spaces in their real names** - `sen_arm, pydoc`,
+> not `sen_arm,`. An earlier pass "deleted" the names without the spaces, which
+> silently did nothing, and reading them appeared to show empty files because the
+> files did not exist. Found by `git status --porcelain -z`, which prints the raw
+> name. Worth remembering: git quotes odd filenames in normal output.
 
-### 5.2 `.gitignore` - the single highest-value change
+`scratch.py`, `inspect_lerobot.py` and `test_omegaconf.py` moved to `sandbox/`
+(tracked) for review another day. Verified: nothing imports them.
 
-Append; remove nothing that is already there.
+### 5.2 `.gitignore` - **DONE** (commit `a829378`)
+
+Measured effect: what `git add -A` would stage went from **3853 files / 1.10 GB**
+to **252 files / 0.02 GB**. The rules applied:
 
 ```gitignore
 # ── Side-clones kept as reading material for coding agents. Each has its own
@@ -174,7 +196,7 @@ git status --porcelain --untracked-files=all | grep -c '^??'   # want ~200, not 
 > 156 MB, keeps ~200 KB of notes and figures). **Say which you prefer** - I have
 > written the wholesale version above, as instructed.
 
-### 5.3 Record the vendored dependencies
+### 5.3 Record the vendored dependencies - **DONE** (commit `a829378`)
 
 `deps/` is gitignored and is not submodules, so **a fresh clone cannot build the
 environment**. Create a tracked `DEPENDENCIES.md` + `scripts/clone_deps.sh`:
@@ -187,7 +209,7 @@ environment**. Create a tracked `DEPENDENCIES.md` + `scripts/clone_deps.sh`:
 | lerobot | `huggingface/lerobot` | `69901b9b` |
 | **agentlace** | `youliangtan/agentlace` | `76984f9` |
 
-### 5.4 Commit and push `trossen_real/`
+### 5.4 Commit `trossen_real/` - **COMMITTED, NOT PUSHED** (commit `5c1cbd0`)
 
 After 5.2, so datasets/EVAL are already ignored:
 
@@ -200,7 +222,7 @@ git push origin dev/abhi-resfit-setup
 
 Then the 19 modified `resfit/` files, in small thematic commits rather than one blob.
 
-### 5.5 Documentation layout - do this LAST
+### 5.5 Documentation layout - **NOT STARTED**, do this LAST
 
 31 `.md` files at the root, **22 of them cross-referenced by other files**, so
 this is a move *plus* a link rewrite, not a plain `mv`. Proposed:
