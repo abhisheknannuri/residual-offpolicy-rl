@@ -23,17 +23,15 @@ from __future__ import annotations
 import json
 import os
 import random
-import shutil
 from pathlib import Path
 
-# imageio-ffmpeg ships a bundled ffmpeg that can fail to launch in fresh (e.g. uv)
-# environments; get_ffmpeg_exe() then blocks on a network download. Prefer a
-# working system ffmpeg if the user hasn't explicitly pinned one. Must run before
-# `import imageio`.
-if not os.environ.get("IMAGEIO_FFMPEG_EXE"):
-    _sys_ffmpeg = shutil.which("ffmpeg")
-    if _sys_ffmpeg:
-        os.environ["IMAGEIO_FFMPEG_EXE"] = _sys_ffmpeg
+# Must run before `import imageio`, which resolves its encoder once. Prefers the
+# ffmpeg bundled inside imageio-ffmpeg over whatever is on PATH - see
+# ffmpeg_setup.py for why that order matters (it is what removes this project's
+# accidental dependency on a conda install).
+from resfit.rl_finetuning.utils.ffmpeg_setup import configure_ffmpeg
+
+configure_ffmpeg()
 
 import imageio
 import numpy as np

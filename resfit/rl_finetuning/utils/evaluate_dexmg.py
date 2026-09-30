@@ -5,15 +5,15 @@
 from __future__ import annotations
 
 import os
-import shutil
 from pathlib import Path
 
-# Prefer a working system ffmpeg over imageio-ffmpeg's bundled binary, which can
-# fail to launch in fresh envs and then block get_ffmpeg_exe() on a download.
-if not os.environ.get("IMAGEIO_FFMPEG_EXE"):
-    _sys_ffmpeg = shutil.which("ffmpeg")
-    if _sys_ffmpeg:
-        os.environ["IMAGEIO_FFMPEG_EXE"] = _sys_ffmpeg
+# Must run before `import imageio`, which resolves its encoder once. Prefers the
+# ffmpeg bundled inside imageio-ffmpeg over whatever is on PATH - see
+# ffmpeg_setup.py for why that order matters (it is what removes this project's
+# accidental dependency on a conda install).
+from resfit.rl_finetuning.utils.ffmpeg_setup import configure_ffmpeg
+
+configure_ffmpeg()
 
 import imageio
 import matplotlib

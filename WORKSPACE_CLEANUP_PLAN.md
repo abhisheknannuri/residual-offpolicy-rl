@@ -632,18 +632,62 @@ bash scripts/clone_deps.sh      # the 5 vendored repos at pinned commits
 uv sync                         # everything else; add --extra real on a station
 ```
 
+### The conda dependency is gone
+
+Two prerequisites were listed above as "belongs in the README". Both were
+examined; neither is a conda dependency, and one was a bug.
+
+**gcc is not a conda thing.** `gcc`/`g++`/`cc` all resolve to `/usr/bin/...`
+(dpkg package `gcc-11`, version 11.4.0). It is a system build tool, already
+present, needed only to compile torchrl. The only real note is that a machine
+whose default gcc is much newer produces a `.so` needing a CXXABI the runtime may
+lack, in which case `CC=gcc-11 CXX=g++-11 uv sync`. That is a README line, not a
+conda install.
+
+**ffmpeg was a bug, not a prerequisite.** There are three sources on this
+machine, none requiring conda:
+
+| source | version | needs anything installed? |
+| --- | --- | --- |
+| `imageio-ffmpeg`'s bundled static binary | **7.0.2** | no - ships in the wheel, `uv sync` installs it, `uv.lock` pins it |
+| PyAV's own linked FFmpeg libraries (557 codecs) | - | no - needs no external binary at all |
+| `/usr/bin/ffmpeg` | 4.4.2 | system package, already present |
+
+Conda's copy was simply **shadowing** `/usr/bin/ffmpeg` on PATH.
+
+The reason it became load-bearing: `train_rollout_recorder.py` and
+`evaluate_dexmg.py` both did
+
+```python
+if not os.environ.get("IMAGEIO_FFMPEG_EXE"):
+    _sys_ffmpeg = shutil.which("ffmpeg")      # <- picks up conda's
+```
+
+justified by a comment saying imageio-ffmpeg's bundled binary "can fail to launch
+in fresh envs and then block `get_ffmpeg_exe()` on a network download".
+**Measured: `get_ffmpeg_exe()` returns a path inside the venv in 2.3 ms and
+downloads nothing** - imageio-ffmpeg 0.6.0 vendors the binary. So the workaround
+was guarding against something that does not happen here, and in doing so made a
+conda install a prerequisite of a conda-free project. It also chose the system's
+ffmpeg 4.4.2 over the bundled 7.0.2.
+
+Fixed by `resfit/rl_finetuning/utils/ffmpeg_setup.py`, which inverts the order:
+an explicit `IMAGEIO_FFMPEG_EXE` wins, then the bundled binary, then PATH. Both
+call sites now use it.
+
+Verified with conda **stripped entirely from PATH** (`env -i`, no `VIRTUAL_ENV`):
+torch/torchrl/CUDA fine, PyAV fine, 112 tests pass, and both video paths write
+real files - the infer-app recorder through PyAV and the training-rollout
+recorder through imageio using the bundled ffmpeg 7.0.2.
+
 ### Still to decide before applying to the real workspace
 
-1. `gcc` for the torchrl build is not expressible in `pyproject.toml`. This
-   machine defaults to gcc 11.4, which is what the build wants, so it worked
-   unset. A machine on gcc 14 would need `CC=gcc-11 CXX=g++-11 uv sync`, so that
-   belongs in the README as a prerequisite rather than in a wrapper script.
-2. `ffmpeg` must be on PATH. On this machine it comes from the conda env
-   (`miniforge3/envs/residual/bin/ffmpeg`), which is a hidden dependency on the
-   thing we are trying to stop using. A station needs a system ffmpeg.
-3. The proposed files are saved as `pyproject.proposed.toml` and
-   `uv.lock.proposed` at the repo root for review; applying them means replacing
-   `pyproject.toml`/`uv.lock` and deleting the three superseded files.
+The proposed files are saved as `pyproject.proposed.toml` and `uv.lock.proposed`
+at the repo root. Applying them means replacing `pyproject.toml` / `uv.lock`,
+deleting `scripts/setup_uv_env.sh`, `constraints-uv.txt` and
+`uv-overrides.txt`, and rebuilding this workspace's `.venv` - so it is worth
+doing deliberately, with `mv .venv .venv.old` kept until a real robot session has
+run on the new one.
 
 ---
 
