@@ -74,13 +74,21 @@ BASE_WANDB_ID="resfit-robomimic-can-bc/pzqj1tmd"
 #   "final"  — end of training
 #   "policy_step" — specific checkpoint at step N (e.g. 25000)
 #
-BASE_WT_TYPE="latest"   # ← step number of the checkpoint to load (recommended: best checkpoint from BC training)
+BASE_WT_TYPE="best"   # ← step number of the checkpoint to load (recommended: best checkpoint from BC training)
 #
 # Which version of the WandB artifact to use:
 #   "latest" — most recent upload (default)
 #   "v0", "v1", etc. — specific version
 #
-BASE_WT_VERSION="latest"
+BASE_WT_VERSION="v0"
+
+# Local checkpoint directory for the base ACT policy. When set (non-empty), the
+# base policy is loaded from this local path and the W&B download above is
+# SKIPPED entirely (local takes priority). Use this for ACT checkpoints trained
+# in another LeRobot repo that are not on W&B.
+# Example (LeRobot pretrained_model dir):
+#   BASE_LOCAL_PATH="/home/qte9489/personal_abhi/Thesis-Docs/Reward_Func/reward_func_ws/RLRewardResearchWS/GeneralistRewardModels/lerobot/outputs/train/policy_rabc/checkpoints/050000/pretrained_model"
+BASE_LOCAL_PATH=${BASE_LOCAL_PATH:-""}
 
 # ╔══════════════════════════════════════════════════════════════════════════╗
 # ║  2. HYDRA CONFIG                                                        ║
@@ -146,7 +154,16 @@ CONFIG_NAME="residual_td3_can_config"
 #   0.2  = more freedom for harder tasks
 #   0.3  = aggressive, risk of destabilizing the base policy
 #
-ACTION_SCALE=0.2
+# NOTE: To use a 7D action scale (e.g., different scales for translation vs rotation),
+# you can pass a list in bash. Ensure there are NO SPACES in the list!
+# Example:
+# ACTION_SCALE="[0.116,0.116,0.116,0.024,0.024,0.024,0.1]"
+# if you update this action scale then makes ure you also update the RANDOM_ACTION_NOISE_SCALE=0.2
+# and STDDEV_MAX="[0.0145,0.0145,0.0145,0.003,0.003,0.003,0.0125]"
+# and STDDEV_MIN="[0.0145,0.0145,0.0145,0.003,0.003,0.003,0.0125]"
+#
+# ACTION_SCALE=${ACTION_SCALE:-0.2}
+ACTION_SCALE="[0.15,0.15,0.15,0.05,0.05,0.05,0.1]"
 #
 # min_action_range: minimum range per action dimension (prevents div-by-zero
 # if some dimension has near-zero variance in the dataset).
@@ -242,14 +259,18 @@ UTD=4
 #   action_scale=0.1, stddev=0.025 → noise is ~25% of the residual range
 #   action_scale=0.2, stddev=0.05 → noise is ~25% of the residual range
 #
-STDDEV_MAX=0.025
-STDDEV_MIN=0.025
-STDDEV_STEP=200000
+# STDDEV_MAX=${STDDEV_MAX:-0.025}
+# STDDEV_MIN=${STDDEV_MIN:-0.025}
+# STDDEV_MAX=${STDDEV_MAX:-0.025}
+STDDEV_MAX="[0.015,0.015,0.015,0.003,0.003,0.003,0.0125]"
+# STDDEV_MIN=${STDDEV_MIN:-0.025}
+STDDEV_MIN="[0.015,0.015,0.015,0.003,0.003,0.003,0.0125]"
+STDDEV_STEP=${STDDEV_STEP:-200000}
 #
 # stddev_clip: hard clip on the TruncatedNormal distribution.
 # Actions are clipped to [mean - stddev_clip, mean + stddev_clip].
 # Default 0.3. Only change if you want tighter/looser exploration bounds.
-STDDEV_CLIP=0.3
+STDDEV_CLIP=${STDDEV_CLIP:-0.3}
 
 # ╔══════════════════════════════════════════════════════════════════════════╗
 # ║  7. WARMUP PHASES                                                      ║
@@ -287,7 +308,8 @@ USE_BASE_POLICY_FOR_WARMUP="true"
 #   With use_base_policy_for_warmup=false:
 #     1.0 = full uniform random actions in [-1, 1]
 #
-RANDOM_ACTION_NOISE_SCALE=0.2
+# RANDOM_ACTION_NOISE_SCALE=0.2
+RANDOM_ACTION_NOISE_SCALE="[0.15,0.15,0.15,0.05,0.05,0.05,0.1]"
 #
 # Phase 2: CRITIC WARMUP (critic_warmup_steps)
 # ─────────────────────────────────────────────
@@ -341,7 +363,7 @@ OFFLINE_DATASET="poolvarine/robomimic-mh-can-image-sparse"
 #   80000  = standard (recommended)
 #   200000 = large (for >32GB RAM servers)
 #
-BUFFER_SIZE=80000
+BUFFER_SIZE=100000
 #
 # batch_size: number of transitions per gradient update
 # Each batch = offline_fraction from offline_rb + rest from online_rb.
@@ -358,7 +380,7 @@ SAMPLING="uniform"
 #   50  = recommended by task-specific config (small but sufficient for Lift)
 #   100 = more demo data for stabler training
 #   300 = all available (slower loading, more conservative training)
-OFFLINE_EPISODES=100
+OFFLINE_EPISODES=300
 #
 # offline_fraction: what fraction of each training batch comes from offline data
 #   0.5 = half offline, half online (standard RLPD)
@@ -457,7 +479,7 @@ CRITIC_LOSS_TYPE="mse"
 #   normalization (this is already the default).
 V_MIN=0.0
 # V_MAX=1.0
-V_MAX=80.0
+V_MAX=1.0
 
 # ╔══════════════════════════════════════════════════════════════════════════╗
 # ║  12. EVALUATION                                                        ║
@@ -584,11 +606,11 @@ IMAGE_SIZE=84                           # ← uncomment if dataset is not 84×84
 # ╔══════════════════════════════════════════════════════════════════════════╗
 # ║  17. WANDB                                                             ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
-WANDB_PROJECT="robomimic-cube-residual-td3"
-WANDB_NAME=""               # empty = auto-generated name with params + seed
-WANDB_GROUP=""
-WANDB_ENTITY=""             # empty = default entity
-WANDB_MODE="online"         # "online", "offline", "disabled"
+WANDB_PROJECT=${WANDB_PROJECT:-"robomimic-can-residual-td3-withOfflineRL"}
+WANDB_NAME=${WANDB_NAME:-"withOfflineRL_resScaleList_dropLR"}               # empty = auto-generated name with params + seed
+WANDB_GROUP=${WANDB_GROUP:-""}
+WANDB_ENTITY=${WANDB_ENTITY:-""}             # empty = default entity
+WANDB_MODE=${WANDB_MODE:-"online"}         # "online", "offline", "disabled"
 
 # ╔══════════════════════════════════════════════════════════════════════════╗
 # ║  18. SEED & DEBUG                                                      ║
@@ -647,6 +669,48 @@ FREEZE_ENCODER="false"
 # Target action noise (TD3 policy smoothing)
 TARGET_ACTION_NOISE="true"
 
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  20. STAGE-AWARE EXTERNAL REWARD MODEL (SARM / TCC via HTTP)           ║
+# ╚══════════════════════════════════════════════════════════════╝
+#
+# When enabled, the training env reward is replaced by a Potential-Based Reward
+# Shaping (PBRS) signal driven by an external reward model served over HTTP:
+#   r = r_sparse + gamma * phi(stage') - phi(stage)
+# Start the reward server FIRST (SARM: opensarm/reward_server.py, TCC:
+# tcc_torch/reward_server.py) on ${REWARD_SERVER_URL}. Training aborts at startup
+# if the server is unreachable (require_server defaults true).
+#
+# NOTE: enabling this also sets algo.terminated_only_bootstrap=true so the PBRS
+# potentials telescope correctly under n-step returns.
+#
+REWARD_MODEL_ENABLED="false"                 # ← set true to use the reward model
+REWARD_MODEL_BACKEND="sarm"                  # "sarm" | "tcc"
+REWARD_SERVER_URL="http://127.0.0.1:8001"
+REWARD_TASK_PROMPT="pick up the can and place it in the bin"
+REWARD_QUERY_EVERY_K=5                        # query every k env steps (20Hz -> 4Hz)
+REWARD_HYSTERESIS_K=5                         # consecutive confs to advance a stage
+REWARD_CONF_THRESHOLD=0.80                    # min stage confidence for an upgrade
+REWARD_POTENTIALS="[0.0,0.05,0.1,0.15]"       # per-stage potentials (4 stages)
+REWARD_KEEP_SPARSE_TERM="true"                # keep sparse success reward in PBRS
+REWARD_IMAGE_VFLIP="false"                    # vertically flip frames if needed
+TERMINATED_ONLY_BOOTSTRAP="true"              # required for PBRS (see note above)
+
+# Offline PBRS reward labeling (optional). Point at a sidecar parquet produced by
+# scripts/label_offline_pbrs.py to feed matching PBRS rewards into the OFFLINE
+# buffer (read like next.reward, keyed by global frame index). Leave empty to use
+# the dataset's own sparse/dense reward. Generic: works for any labeled column.
+OFFLINE_REWARD_PARQUET=""
+OFFLINE_REWARD_COLUMN="reward_pbrs"
+
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  21. OFFLINE RL (TD3-BC)                                               ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+TRAIN_OFFLINE_RL="true"
+OFFLINE_RL_STEPS=75000
+OFFLINE_SAVE_FREQ=5000
+OFFLINE_EVAL_INTERVAL=5000
+
+
 # ============================================================================
 # BUILD AND RUN
 # ============================================================================
@@ -693,6 +757,12 @@ CMD=(
     algo.stddev_step="${STDDEV_STEP}"
     algo.critic_warmup_steps="${CRITIC_WARMUP}"
     algo.actor_lr_warmup_steps="${ACTOR_LR_WARMUP_STEPS}"
+
+    # ── Offline RL Phase (TD3-BC) ──
+    algo.train_offline_rl="${TRAIN_OFFLINE_RL}"
+    algo.offline_rl_steps="${OFFLINE_RL_STEPS}"
+    algo.offline_save_freq="${OFFLINE_SAVE_FREQ}"
+    algo.offline_eval_interval_every_steps="${OFFLINE_EVAL_INTERVAL}"
 
     # ── Actor config ──
     agent.actor_lr="${ACTOR_LR}"
@@ -756,6 +826,29 @@ CMD=(
 [[ -n "${SEED}" ]]         && CMD+=(seed="${SEED}")
 [[ -n "${RESUME_CKPT}" ]]  && CMD+=(resume_ckpt="${RESUME_CKPT}")
 [[ -n "${IMAGE_SIZE}" ]]   && CMD+=(offline_data.image_size="${IMAGE_SIZE}")
+
+# Local base-policy checkpoint (takes priority over W&B)
+[[ -n "${BASE_LOCAL_PATH}" ]] && CMD+=(base_policy.local_path="${BASE_LOCAL_PATH}")
+
+# Offline sidecar reward (PBRS / any labeled column) for the offline buffer
+[[ -n "${OFFLINE_REWARD_PARQUET}" ]] && CMD+=(offline_data.reward_parquet="${OFFLINE_REWARD_PARQUET}" offline_data.reward_column="${OFFLINE_REWARD_COLUMN}")
+
+# Stage-aware external reward model (PBRS). Requires the reward server running.
+if [[ "${REWARD_MODEL_ENABLED}" == "true" ]]; then
+    CMD+=(
+        reward_model.enabled=true
+        reward_model.backend="${REWARD_MODEL_BACKEND}"
+        reward_model.server_url="${REWARD_SERVER_URL}"
+        reward_model.task_prompt="${REWARD_TASK_PROMPT}"
+        reward_model.query_every_k="${REWARD_QUERY_EVERY_K}"
+        reward_model.hysteresis_k="${REWARD_HYSTERESIS_K}"
+        reward_model.conf_threshold="${REWARD_CONF_THRESHOLD}"
+        "reward_model.potentials=${REWARD_POTENTIALS}"
+        reward_model.keep_sparse_term="${REWARD_KEEP_SPARSE_TERM}"
+        reward_model.image_vflip="${REWARD_IMAGE_VFLIP}"
+        algo.terminated_only_bootstrap="${TERMINATED_ONLY_BOOTSTRAP}"
+    )
+fi
 
 "${CMD[@]}"
 

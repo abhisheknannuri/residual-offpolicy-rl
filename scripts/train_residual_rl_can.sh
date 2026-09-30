@@ -82,6 +82,14 @@ BASE_WT_TYPE="latest"   # ← step number of the checkpoint to load (recommended
 #
 BASE_WT_VERSION="latest"
 
+# Local checkpoint directory for the base ACT policy. When set (non-empty), the
+# base policy is loaded from this local path and the W&B download above is
+# SKIPPED entirely (local takes priority). Use this for ACT checkpoints trained
+# in another LeRobot repo that are not on W&B.
+# Example (LeRobot pretrained_model dir):
+#   BASE_LOCAL_PATH="/home/qte9489/personal_abhi/Thesis-Docs/Reward_Func/reward_func_ws/RLRewardResearchWS/GeneralistRewardModels/lerobot/outputs/train/policy_rabc/checkpoints/050000/pretrained_model"
+BASE_LOCAL_PATH=""
+
 # ╔══════════════════════════════════════════════════════════════════════════╗
 # ║  2. HYDRA CONFIG                                                        ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
@@ -197,8 +205,7 @@ N_STEP=3
 #   0.99   = standard (shorter effective horizon)
 #   0.995  = recommended for Lift (long-horizon sparse reward)
 #   0.999  = very long horizon
-GAMMA=0.995
-
+GAMMA=0.97
 # Updates-to-data ratio (UTD) — how many gradient updates per environment step.
 # Higher = more sample efficient but slower wall-clock per step.
 #   1  = on-policy ratio
@@ -310,7 +317,7 @@ CRITIC_WARMUP=10000
 # If you trained BC on a different dataset (e.g. your own 256×256),
 # override it here so RL uses matching demos.
 #
-OFFLINE_DATASET="poolvarine/robomimic-mh-can-image-dense"
+OFFLINE_DATASET="poolvarine/robomimic-mh-can-image-dense-scaled-100"
 # OFFLINE_DATASET="ankile/robomimic-mh-can-image"   # ← ankile's 84×84 original
 #
 # ┌─────────────────────────────────────────────────────────────────────────┐
@@ -647,6 +654,50 @@ FREEZE_ENCODER="false"
 # Target action noise (TD3 policy smoothing)
 TARGET_ACTION_NOISE="true"
 
+# ╔══════════════════════════════════════════════════════════════════════════╗
+#                           Custom Gym Wrapper Configurations
+# ╚══════════════════════════════════════════════════════════════════════════╝
+# Reward manipulation wrapper: modifies rewards for better learning
+USE_REWARD_MANIPULATION_WRAPPER="true"
+TERMINATE_ON_SUCCESS="true"
+# Lift Horizon is set to 100 in RobosuiteGymWrapper.
+# Max shape is 0.55 in Robosuite dense rewards so scale = 0.55 * 90 (since, robot needs min of 10 steps to reach that max shape) = 49.5 ~= 50.0
+DENSE_SUCCESS_BONUS_SCALE="100.0" 
+
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  20. STAGE-AWARE EXTERNAL REWARD MODEL (SARM / TCC via HTTP)           ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+#
+# When enabled, the training env reward is replaced by a Potential-Based Reward
+# Shaping (PBRS) signal driven by an external reward model served over HTTP:
+#   r = r_sparse + gamma * phi(stage') - phi(stage)
+# Start the reward server FIRST (SARM: opensarm/reward_server.py, TCC:
+# tcc_torch/reward_server.py) on ${REWARD_SERVER_URL}. Training aborts at startup
+# if the server is unreachable (require_server defaults true).
+#
+# NOTE: enabling this also sets algo.terminated_only_bootstrap=true so the PBRS
+# potentials telescope correctly under n-step returns (does not affect sparse
+# runs where this stays false).
+#
+REWARD_MODEL_ENABLED="false"                 # ← set true to use the reward model
+REWARD_MODEL_BACKEND="sarm"                  # "sarm" | "tcc"
+REWARD_SERVER_URL="http://127.0.0.1:8001"
+REWARD_TASK_PROMPT="pick up the can and place it in the bin"
+REWARD_QUERY_EVERY_K=5                        # query every k env steps (20Hz -> 4Hz)
+REWARD_HYSTERESIS_K=5                         # consecutive confs to advance a stage
+REWARD_CONF_THRESHOLD=0.80                    # min stage confidence for an upgrade
+REWARD_POTENTIALS="[0.0,0.05,0.1,0.15]"       # per-stage potentials (4 stages)
+REWARD_KEEP_SPARSE_TERM="true"                # keep sparse success reward in PBRS
+REWARD_IMAGE_VFLIP="false"                    # vertically flip frames if needed
+TERMINATED_ONLY_BOOTSTRAP="true"              # required for PBRS (see note above)
+
+# Offline PBRS reward labeling (optional). Point at a sidecar parquet produced by
+# scripts/label_offline_pbrs.py to feed matching PBRS rewards into the OFFLINE
+# buffer (read like next.reward, keyed by global frame index). Leave empty to use
+# the dataset's own sparse/dense reward. Generic: works for any labeled column.
+OFFLINE_REWARD_PARQUET=""
+OFFLINE_REWARD_COLUMN="reward_pbrs"
+
 # ============================================================================
 # BUILD AND RUN
 # ============================================================================
@@ -735,6 +786,9 @@ CMD=(
     video_key="${VIDEO_KEY}"
     "rl_camera=${RL_CAMERA}"
     reward_shaping="${REWARD_SHAPING}"
+    use_reward_manipulation_wrapper="${USE_REWARD_MANIPULATION_WRAPPER}"
+    terminate_on_success="${TERMINATE_ON_SUCCESS}"
+    dense_success_bonus_scale="${DENSE_SUCCESS_BONUS_SCALE}"
 
     # ── Checkpointing ──
     save_freq="${SAVE_FREQ}"
@@ -756,6 +810,29 @@ CMD=(
 [[ -n "${SEED}" ]]         && CMD+=(seed="${SEED}")
 [[ -n "${RESUME_CKPT}" ]]  && CMD+=(resume_ckpt="${RESUME_CKPT}")
 [[ -n "${IMAGE_SIZE}" ]]   && CMD+=(offline_data.image_size="${IMAGE_SIZE}")
+
+# Local base-policy checkpoint (takes priority over W&B)
+[[ -n "${BASE_LOCAL_PATH}" ]] && CMD+=(base_policy.local_path="${BASE_LOCAL_PATH}")
+
+# Offline sidecar reward (PBRS / any labeled column) for the offline buffer
+[[ -n "${OFFLINE_REWARD_PARQUET}" ]] && CMD+=(offline_data.reward_parquet="${OFFLINE_REWARD_PARQUET}" offline_data.reward_column="${OFFLINE_REWARD_COLUMN}")
+
+# Stage-aware external reward model (PBRS). Requires the reward server running.
+if [[ "${REWARD_MODEL_ENABLED}" == "true" ]]; then
+    CMD+=(
+        reward_model.enabled=true
+        reward_model.backend="${REWARD_MODEL_BACKEND}"
+        reward_model.server_url="${REWARD_SERVER_URL}"
+        reward_model.task_prompt="${REWARD_TASK_PROMPT}"
+        reward_model.query_every_k="${REWARD_QUERY_EVERY_K}"
+        reward_model.hysteresis_k="${REWARD_HYSTERESIS_K}"
+        reward_model.conf_threshold="${REWARD_CONF_THRESHOLD}"
+        "reward_model.potentials=${REWARD_POTENTIALS}"
+        reward_model.keep_sparse_term="${REWARD_KEEP_SPARSE_TERM}"
+        reward_model.image_vflip="${REWARD_IMAGE_VFLIP}"
+        algo.terminated_only_bootstrap="${TERMINATED_ONLY_BOOTSTRAP}"
+    )
+fi
 
 "${CMD[@]}"
 

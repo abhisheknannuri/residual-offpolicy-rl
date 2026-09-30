@@ -180,10 +180,10 @@ POLICY_KWARGS=""
 # ║  TRAINING                                                               ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
 
-STEPS=50000                              # Total optimization steps
+STEPS=25000                              # Total optimization steps
                                           # Lift is simpler than Coffee — 100K usually suffices
                                           # 50K for quick tests, 200K for thorough training
-BATCH_SIZE=256                            # Batch size. 128 fits 16GB GPU, 256 on 48GB
+BATCH_SIZE=64                            # Batch size. 128 fits 16GB GPU, 256 on 48GB
 GRAD_CLIP_NORM=10.0                       # Gradient clipping norm (default 10.0)
 NUM_WORKERS=4                             # Dataloader workers (4 is good default)
 SEED=""                                   # Random seed. "" = random, or set e.g. SEED="42"
