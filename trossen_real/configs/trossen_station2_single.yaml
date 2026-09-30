@@ -1,0 +1,95 @@
+# Trossen teleop station config: single-arm example.
+# IP addresses, camera serials, and bounds below are PLACEHOLDERS -
+# fill in with real values before connecting to hardware.
+
+station_name: trossen_station2_single
+arm_mode: single  # "single" or "dual"
+
+robots:
+  follower:
+    single: {ip: "192.168.1.3"}
+  leader:
+    single: {ip: "192.168.1.2"}
+
+# Where `follower_single_server.py` (standalone, single follower robot) is running
+# for this station. app.py talks to it over HTTP - launch it first, in its
+# own terminal: python -m trossen_real.follower.follower_single_server --config trossen_station2_single --port 5060
+follower_server_url: "http://127.0.0.1:5060"
+
+cameras:
+  resolution: [256, 256]
+  fps: 30
+  devices:
+    # Up to 4 entries; UI renders them in order into a fixed 2x2 grid.
+    # serial: RealSense serial number. Leave "" to force a synthetic mock
+    # feed for that slot (useful for developing/testing without hardware).
+    - name: cam_high
+      serial: "420222071698"
+    - name: cam_right_wrist
+      serial: "230322273819"
+    - name: cam_left_wrist
+      serial: "230322276713"
+      # Crop to this box (pixel coords in the 640x480 native capture
+      # resolution, top-left/bottom-right corners) BEFORE resizing to
+      # `resolution` above - frames the cube insertion task properly
+      # instead of squashing the whole native FOV down uniformly.
+      roi: [155, 200, 490, 410] # at robot sleep pose with gripper open
+    - name: cam_front
+      serial: ""
+
+control:
+  frequency_hz: 20
+  # "ee" (default): cartesian EE-pose control (x,y,z,ax,ay,az+gripper).
+  # "joint": raw joint-space control (6 arm joints+gripper), matches
+  # Trossen's own official `lerobot_trossen` reference implementation.
+  # See ControlConfig.command_space in config.py for the full explanation.
+  command_space: joint
+  # "absolute" (default): follower target = the leader's raw pose/joints,
+  # forwarded directly - matches Trossen's own reference (always mirrors
+  # absolute, never delta). Only sensible if leader/follower share a
+  # consistent frame.
+  # "delta" (command_space: ee only): follower moves by the leader's pose
+  # delta each tick instead. See ControlConfig.control_mode in config.py for
+  # the full tradeoff explanation.
+  control_mode: absolute
+  # NOT 0.044 (hardware max) - a fast (0.1s) gripper move was observed to
+  # overshoot to 0.044262 on real hardware, faulting the arm ("Joint limit
+  # exceeded"). Small margin here; adjust if your gripper's overshoot differs.
+  gripper_open: 0.04
+  gripper_closed: 0.004
+  # goal_time_s (used for every per-tick move) = goal_time_multiplier /
+  # frequency_hz - matches Trossen's own `min_time_to_move_multiplier`
+  # convention exactly (their default: 3.0/30Hz=0.1s). 2.0 here reproduces
+  # the previous fixed goal_time_s: 0.1 at frequency_hz: 20 exactly.
+  goal_time_multiplier: 2.5
+  # Slower goal_time for discrete UI/API gripper commands (button clicks) -
+  # the fast per-tick goal_time above is tuned for small continuous teleop
+  # deltas and overshoots the limit if used for a full open/close stroke.
+  gripper_button_goal_time_s: 1.5
+
+# Safety clip box applied to every commanded follower EE absolute position (meters,
+# base frame). Keep tight until verified safe on the real robot.
+ee_bounds:
+  single:
+    xyz_min: [0.05, -0.35, -0.027]
+    xyz_max: [0.45, 0.35, 0.45]
+
+# Reset settings for the follower arm(s). Two stages (see follower/follower_single.py):
+#   1. Always: joint-space move to `staged_joint_positions` (6 joints + gripper,
+#      radians/meters), gripper opened. This is a fixed, known-safe configuration.
+#   2. Only if `randomize_ee` is true: read back the EE pose stage 1 landed on,
+#      then sample a random offset (+/- xyz_offset, meters) around it and move
+#      there via EE-pose (cartesian) control - never joint control.
+reset:
+  single:
+    staged_joint_positions: [0.0, 1.5707963267948966, 1.5707963267948966, -1.5707963267948966, 0.0, 0.0, 0.044]
+    randomize_ee: false
+    xyz_offset: [0.025, 0.025, 0.025]
+    randomize_angles: false
+    angle_offset: [0.1, 0.1, 0.1]
+    # Time (s) to reach the staged position / randomized EE target - slower
+    # than regular teleop/policy moves is safer for a big reset jump.
+    goal_time_s: 3.0
+
+dataset:
+  save_root: trossen_real/datasets

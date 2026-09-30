@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Trossen Inference Monitor</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <h1>Trossen Inference Monitor</h1>
+    <div id="connection-status" class="status-pill disconnected">disconnected</div>
+  </header>
+
+  <section id="connect-panel" class="panel">
+    <label for="station-select">Station config</label>
+    <select id="station-select"></select>
+    <label for="policy-url">Policy server URL</label>
+    <input id="policy-url" type="text" value="http://127.0.0.1:5070" />
+    <label for="action-space">Action space</label>
+    <select id="action-space">
+      <option value="absolute">absolute</option>
+      <option value="delta_joint">delta_joint</option>
+    </select>
+    <label><input id="force-action-space" type="checkbox" /> force (ignore mismatch warning)</label>
+    <label><input id="enable-intervention" type="checkbox" /> enable human intervention (leader + foot pedal)</label>
+    <label><input id="enable-dataset-recording" type="checkbox" /> record dataset (foot pedal for reset/reward, no leader needed)</label>
+    <label for="eval-config-select">Eval mode (blank = off)</label>
+    <select id="eval-config-select"><option value="">off</option></select>
+    <label for="eval-checkpoint">Checkpoint label (eval)</label>
+    <input id="eval-checkpoint" type="text" placeholder="e.g. ACT_..._deltajoint/055000" />
+    <label for="eval-operator">Operator (eval)</label>
+    <input id="eval-operator" type="text" placeholder="e.g. abhi" />
+    <button id="connect-btn">Connect</button>
+    <button id="disconnect-btn" disabled>Disconnect</button>
+  </section>
+
+  <section id="infer-panel" class="panel">
+    <label for="settle-time">Settle time (s)</label>
+    <input id="settle-time" type="text" value="2.0" size="4" />
+    <label for="max-steps">Max steps (blank = unlimited)</label>
+    <input id="max-steps" type="text" value="" size="6" />
+    <label><input id="skip-reset" type="checkbox" /> skip reset</label>
+    <label><input id="record-video" type="checkbox" checked /> record video (.mp4)</label>
+    <label for="task-name">Task name (dataset, first Start Inference only)</label>
+    <input id="task-name" type="text" placeholder="e.g. pick_can_v1" />
+    <button id="start-infer-btn" disabled>Start Inference</button>
+    <button id="stop-infer-btn" disabled>Stop Inference</button>
+    <button id="reset-robot-btn" disabled title="Move the follower to the staged reset pose (and re-sync the leader if intervention is on). Disabled while inference is running.">Reset Robot</button>
+  </section>
+
+  <section id="video-grid" class="video-grid"></section>
+
+  <section id="status-panel" class="panel">
+    <h2>Status</h2>
+    <div id="follower-status"></div>
+    <div id="policy-status"></div>
+    <div id="camera-status"></div>
+    <div id="infer-status"></div>
+    <div id="intervention-status"></div>
+    <div id="dataset-status"></div>
+    <div id="error-status" class="error-text"></div>
+  </section>
+
+  <!-- Evaluation mode. Hidden unless /api/connect was given an eval config.
+       Split in two on purpose (see EVAL_MODE_PLAN.md):
+         #eval-live   - rewritten by polling, safe to clobber
+         #eval-review - operator-owned, only re-rendered when the pending run
+                        changes, so typing is never wiped mid-keystroke. -->
+  <section id="eval-panel" class="panel hidden">
+    <h2>Evaluation <span id="eval-config-name" class="muted"></span></h2>
+    <div id="eval-live"></div>
+    <!-- NOTE: this does NOT move anything. The cube is placed BY HAND; this only
+         records which of the N configurations you set up, so the saved run and
+         the coordinates shown below refer to the same pose. -->
+    <div id="eval-place-hint">Place the cube at: <b id="eval-pose-hint"></b></div>
+    <div id="eval-pose-row">
+      <label for="eval-pose-index">Cube is at pose #</label>
+      <input id="eval-pose-index" type="number" min="1" size="3" />
+      <button id="eval-pose-set" title="Record which cube configuration is on the table. Moves nothing.">Set (label only)</button>
+      <span class="muted">robot does not move - the cube is placed by hand</span>
+    </div>
+    <div id="eval-review" class="hidden">
+      <div id="eval-review-head"></div>
+      <div id="eval-stage-buttons" class="stage-row"></div>
+      <div id="eval-assist-row" class="hidden">
+        <label for="eval-assist-stage">Intervened during</label>
+        <select id="eval-assist-stage"></select>
+      </div>
+      <label for="eval-note">Failure mode / note</label>
+      <input id="eval-note" type="text" placeholder="e.g. did not seat the cube" />
+      <div class="review-actions">
+        <button id="eval-save-btn" class="primary">Save (Enter)</button>
+        <button id="eval-discard-btn">Discard (Backspace)</button>
+      </div>
+      <div id="eval-review-hint" class="muted">
+        Keys: ` = none, 0-3 = furthest sub-stage, Enter = save, Backspace = discard
+      </div>
+    </div>
+  </section>
+
+  <script src="/static/app.js"></script>
+  <script src="/static/eval.js"></script>
+</body>
+</html>

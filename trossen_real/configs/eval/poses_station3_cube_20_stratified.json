@@ -1,0 +1,144 @@
+{
+  "generator": {
+    "method": "stratified",
+    "seed": 42,
+    "n_poses": 20,
+    "ordered_for_printing": true,
+    "mat_per_page": 5,
+    "regenerate_with": "generate_eval_poses.py --method stratified --seed 42 --n-poses 20 --order-for-printing --mat-per-page 5"
+  },
+  "seed": 42,
+  "workspace_cm": [
+    22.5,
+    14.5
+  ],
+  "cube_cm": 3.0,
+  "yaw_choices_deg": [
+    0.0,
+    45.0,
+    -45.0
+  ],
+  "max_overhang_cm": 1.0,
+  "poses": [
+    {
+      "index": 1,
+      "x_cm": 8.4902,
+      "y_cm": 10.7342,
+      "yaw_deg": 45.0
+    },
+    {
+      "index": 2,
+      "x_cm": 15.8043,
+      "y_cm": 8.2345,
+      "yaw_deg": 0.0
+    },
+    {
+      "index": 3,
+      "x_cm": 20.9628,
+      "y_cm": 5.0912,
+      "yaw_deg": 45.0
+    },
+    {
+      "index": 4,
+      "x_cm": 5.0405,
+      "y_cm": 4.3201,
+      "yaw_deg": 45.0
+    },
+    {
+      "index": 5,
+      "x_cm": 17.3372,
+      "y_cm": 2.3782,
+      "yaw_deg": -45.0
+    },
+    {
+      "index": 6,
+      "x_cm": 15.589,
+      "y_cm": 11.8322,
+      "yaw_deg": 0.0
+    },
+    {
+      "index": 7,
+      "x_cm": 11.8156,
+      "y_cm": 7.5022,
+      "yaw_deg": -45.0
+    },
+    {
+      "index": 8,
+      "x_cm": 3.1857,
+      "y_cm": 5.6569,
+      "yaw_deg": -45.0
+    },
+    {
+      "index": 9,
+      "x_cm": 16.1207,
+      "y_cm": 5.9662,
+      "yaw_deg": 0.0
+    },
+    {
+      "index": 10,
+      "x_cm": 9.3807,
+      "y_cm": 2.2154,
+      "yaw_deg": 45.0
+    },
+    {
+      "index": 11,
+      "x_cm": 2.7836,
+      "y_cm": 12.0112,
+      "yaw_deg": 0.0
+    },
+    {
+      "index": 12,
+      "x_cm": 20.6647,
+      "y_cm": 11.2902,
+      "yaw_deg": -45.0
+    },
+    {
+      "index": 13,
+      "x_cm": 9.6431,
+      "y_cm": 7.4683,
+      "yaw_deg": 45.0
+    },
+    {
+      "index": 14,
+      "x_cm": 12.6935,
+      "y_cm": 5.1161,
+      "yaw_deg": 45.0
+    },
+    {
+      "index": 15,
+      "x_cm": 20.6514,
+      "y_cm": 2.5434,
+      "yaw_deg": -45.0
+    },
+    {
+      "index": 16,
+      "x_cm": 7.1314,
+      "y_cm": 11.0293,
+      "yaw_deg": 45.0
+    },
+    {
+      "index": 17,
+      "x_cm": 0.9677,
+      "y_cm": 8.985,
+      "yaw_deg": -45.0
+    },
+    {
+      "index": 18,
+      "x_cm": 20.143,
+      "y_cm": 7.6724,
+      "yaw_deg": 0.0
+    },
+    {
+      "index": 19,
+      "x_cm": 1.7228,
+      "y_cm": 2.4902,
+      "yaw_deg": 0.0
+    },
+    {
+      "index": 20,
+      "x_cm": 13.8607,
+      "y_cm": 1.7988,
+      "yaw_deg": 0.0
+    }
+  ]
+}

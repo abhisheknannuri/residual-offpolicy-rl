@@ -1,0 +1,46 @@
+# Evaluation rubric for PickCubeAndInsert on Trossen Station 3.
+# Transcribed from trossen_real/EVAL/ACT/TrossenStation3/Notes.md - keep them in
+# sync; `config_hash` (derived from stages + poses + max_steps) is recorded in
+# every run summary, so a change here makes older results visibly incomparable.
+#
+# Design: trossen_real/infer_app/EVAL_MODE_PLAN.md
+
+eval_name: pick_cube_and_insert_station3
+task_label: PickCubeAndInsert
+
+# The operator records the FURTHEST sub-stage completed (one keystroke), not four
+# independent booleans - see EVAL_MODE_PLAN.md §0. Completing the last stage
+# (index 3) is full task success.
+stages:
+  - id: approach
+    name: "Approach the Red Cube"
+  - id: grasp_lift
+    name: "Grasp & Lift the Red Cube"
+  - id: transport
+    name: "Transport the Red Cube on top of the Placement Hole"
+  - id: insert
+    name: "Insert the Red Cube"
+
+# A "pose" is the CUBE's placement on the table (x, y, yaw in cm/deg), set by
+# hand before each run - not a robot pose.
+#
+# Fully reproducible, nothing hand-picked. Regenerate the poses AND the printable
+# mat byte-for-byte with:
+#   .venv/bin/python trossen_real/scripts/generate_eval_poses.py \
+#       --method stratified --seed 42 --n-poses 20 --order-for-printing \
+#       --out trossen_real/configs/eval/poses_station3_cube_20_stratified.json \
+#       --mat trossen_real/EVAL/ACT/TrossenStation3/placement_mat.pdf
+# (the same command is stored inside the pose file under "generator")
+#
+# stratified = one cube per cell of a grid over the workspace, jittered inside
+# its cell. Plain uniform random (the earlier poses_station3_cube_20.json, kept
+# for provenance) left a 5.3 cm band of the workspace untested, 8 of 20 grid
+# cells empty and two poses 0.65 cm apart.
+# order-for-printing = renumbered so mat page 1 holds poses 1-5, page 2 holds
+# 6-10 etc, with no overlapping outlines on any page.
+poses_file: poses_station3_cube_20_stratified.json
+
+max_steps_default: 500      # Notes.md: "Max Steps: 500"
+output_root: eval_runs
+
+operators: []               # optional allow-list; empty = free text

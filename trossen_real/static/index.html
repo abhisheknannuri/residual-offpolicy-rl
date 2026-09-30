@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Trossen Teleop Client</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <h1>Trossen Teleop Client</h1>
+    <div id="connection-status" class="status-pill disconnected">disconnected</div>
+  </header>
+
+  <section id="connect-panel" class="panel">
+    <label for="station-select">Station config</label>
+    <select id="station-select"></select>
+    <label><input id="enable-pedal-episode-control" type="checkbox" /> enable foot pedal episode control (reset/reward pedal ends recording, no leader needed)</label>
+    <button id="connect-btn">Connect</button>
+    <button id="disconnect-btn" disabled>Disconnect</button>
+    <span id="mock-badge" class="badge hidden">MOCK HARDWARE</span>
+  </section>
+
+  <section id="session-panel" class="panel">
+    <label for="task-name">Task name</label>
+    <input id="task-name" type="text" placeholder="e.g. pick_can_v1" />
+    <button id="start-session-btn" disabled>Initiate Teleop (start session)</button>
+    <button id="stop-session-btn" disabled>End Session</button>
+    <span id="session-dir" class="muted"></span>
+  </section>
+
+  <section id="video-grid" class="video-grid">
+    <div class="video-cell"><div class="video-label">cam 1</div><img id="cam-0" /></div>
+    <div class="video-cell"><div class="video-label">cam 2</div><img id="cam-1" /></div>
+    <div class="video-cell"><div class="video-label">cam 3</div><img id="cam-2" /></div>
+    <div class="video-cell"><div class="video-label">cam 4</div><img id="cam-3" /></div>
+  </section>
+
+  <section id="record-panel" class="panel">
+    <button id="start-recording-btn" disabled>Start Recording</button>
+    <button id="stop-recording-btn" disabled>Stop Recording</button>
+    <span id="episode-counter" class="muted">episodes: 0</span>
+  </section>
+
+  <section id="action-panel" class="panel">
+    <button id="reset-btn" disabled>Reset (randomize pose)</button>
+    <div id="gripper-buttons"></div>
+  </section>
+
+  <section id="status-panel" class="panel">
+    <h2>Status</h2>
+    <div id="arm-status"></div>
+    <div id="camera-status"></div>
+    <div id="tick-status" class="muted"></div>
+    <div id="pedal-status" class="muted"></div>
+  </section>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
