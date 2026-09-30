@@ -12,6 +12,10 @@ data/
 # ── Dependencies (cloned repos, installed separately) ──
 deps/
 
+# ── Teleop client recordings (large, machine-specific) ──
+trossen_real/datasets/*
+!trossen_real/datasets/.gitkeep
+
 # ── Python ──
 __pycache__/
 *.py[cod]
@@ -44,3 +48,58 @@ Thumbs.db
 
 # ── Docker volumes (if mounted locally) ──
 docker-volumes/
+
+
+*.parquet
+
+# ── Logs (see trossen_real/log_setup.py) ──
+# logs/<app_name>/<date>/<time>/app.log, every app - never meant to be
+# committed, was already untracked before this entry existed.
+logs/
+# ══════════════════════════════════════════════════════════════════════════
+# Added 2026-09-30 (see WORKSPACE_CLEANUP_PLAN.md)
+# ══════════════════════════════════════════════════════════════════════════
+
+# ── Side-clones kept as reading material for coding agents. Each has its OWN
+#    .git, so committing them would create broken gitlinks nobody can fetch.
+#    agentlace is the exception that is NOT just reading material: it is
+#    imported at runtime by
+#    resfit/rl_finetuning/off_policy/distributed/transport.py, which adds this
+#    clone to sys.path. It is ignored here because it is a foreign repo, and
+#    pinned in DEPENDENCIES.md instead - the distributed trainer breaks on a
+#    fresh checkout without it.
+/openpi/
+/hil-serl/
+/lerobot_trossen/
+/TD3_BC/
+/agentlace/
+
+# ── Recorded robot data, evals and logs (large, machine-specific, regenerable
+#    from the raw runs; see trossen_real/scripts/collect_eval_artifacts.py).
+/infer_videos/
+/infer_dataset/
+/infer_logs/
+/RealTrainLogs/
+/eval_runs/
+/eval_runs_OLD_*/
+trossen_real/EVAL/
+/videos/
+/videos_can/
+/videos_can_action_scale02/
+/pbrs_validation/
+/realsense_cam_test/
+
+# ── Nested virtualenvs (TD3_BC ships a 2 GB one) and this repo's own.
+.venv/
+**/.venv/
+**/venv/
+
+# ── Timestamped safety copies: keep them on disk, keep them OUT of git.
+*.bak
+
+# ── Coding-agent / editor state
+.claude/
+
+# ── Scratch areas
+/scratch/
+scripts/temp/
