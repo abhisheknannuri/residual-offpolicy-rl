@@ -1,0 +1,18 @@
+# uv install constraints: keep the ALREADY-INSTALLED torch stack pinned so that
+# installing the vendored editable deps (which only require torch>=2.2.1 etc.)
+# can never silently upgrade/downgrade it. These stay as *constraints* (not
+# overrides) because torch/torchcodec are the CUDA `+cu128` builds from the
+# pytorch index — an override would try to re-resolve them from PyPI (CPU
+# wheels). A bare `==2.11.0` constraint matches the local build `2.11.0+cu128`
+# (PEP 440 ignores the local version segment when the specifier has none).
+#
+# The version pins that CONFLICT with the vendored deps' own hard `==` pins live
+# in uv-overrides.txt instead — a constraint must satisfy EVERY requirer, so a
+# constraint of gymnasium==1.1.1 vs lerobot's hard gymnasium==0.29.1 is
+# "unsatisfiable"; an --overrides entry REPLACES lerobot's pin instead.
+torch==2.11.0
+torchvision==0.26.0
+torchaudio==2.11.0
+torchcodec==0.11.0
+tensordict==0.9.1
+numpy==2.2.6

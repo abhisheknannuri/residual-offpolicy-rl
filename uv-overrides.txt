@@ -1,0 +1,24 @@
+# uv dependency OVERRIDES (uv pip install --overrides uv-overrides.txt ...)
+#
+# Unlike -c/--constraints (which must satisfy EVERY requirer and therefore FAIL
+# on a hard `==` pin), --overrides REPLACES whatever version a dependency asks
+# for. The vendored editable deps hard-pin versions the resfit code cannot use,
+# so we force the working ones here:
+#
+#   * lerobot pins `gymnasium==0.29.1`, but resfit's vectorized env uses the
+#     gymnasium 1.x autoreset API (`gym.vector.AutoresetMode.SAME_STEP`).
+#     -> force 1.1.1 (the version the known-good conda env actually runs).
+#
+#   * lerobot is written against the datasets 3.x API
+#     (`torch.stack(hf_dataset[col])`); datasets 5.x returns a lazy `Column`
+#     and breaks LeRobotDataset loading.  -> force 3.6.0.
+#
+#   * robosuite 1.5.1 calls mujoco 3.3's `mj_fullM(m, dst, M)`; mujoco 3.10
+#     changed the signature and breaks the OSC controller on env reset.
+#     -> force 3.3.2.
+#
+# These are plain PyPI packages (no CUDA local-version), so forcing them is safe
+# (the torch stack stays in constraints-uv.txt to avoid a PyPI/CPU re-resolve).
+gymnasium==1.1.1
+datasets==3.6.0
+mujoco==3.3.2

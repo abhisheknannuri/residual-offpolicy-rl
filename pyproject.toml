@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "resfit"
+version = "0.1.0"
+description = "Residual off-policy RL fine-tuning (ResFiT) with stage-aware reward models."
+requires-python = ">=3.10,<3.11"
+# NOTE: the heavy runtime stack is installed by scripts/setup_uv_env.sh, NOT here:
+#   * torch / torchvision / torchaudio / torchcodec  -> CUDA 12.8 wheels (pinned)
+#   * torchrl                                        -> built FROM SOURCE against
+#     torch 2.11 (the published wheels break the C++ ABI under torch 2.11)
+#   * robosuite / mimicgen / dexmimicgen / lerobot   -> editable from deps/
+# The dependencies below are only resfit's own direct (non-torch) requirements so
+# `uv pip install -e .` pulls them; the vendored editable deps bring the rest
+# (mujoco, gymnasium, transformers, datasets, av, ...).
+dependencies = [
+    "hydra-core==1.3.2",
+    "omegaconf==2.3.0",
+    "wandb==0.24.2",
+    "flask==3.1.3",
+    "flask-cors==6.0.0",
+    "imageio==2.36.1",
+    "imageio-ffmpeg==0.6.0",
+    "matplotlib>=3.7",
+    "pyarrow>=17",
+    "requests>=2.31",
+    "tqdm>=4.66",
+    "numpy==2.2.6",
+    "h5py>=3.10",
+    "tabulate>=0.9",
+    # lerobot needs these for ACT policy loading but only lists them as optional
+    # extras, so declare them here to guarantee they land in the env.
+    "transformers==4.48.0",
+    "accelerate>=1.0",
+    # lerobot uses the datasets 3.x API; 5.x breaks LeRobotDataset loading.
+    "datasets==3.6.0",
+    # resfit's vectorized env needs gymnasium 1.x (AutoresetMode); lerobot pins
+    # 0.29.1 but the working conda env runs 1.1.1.
+    "gymnasium==1.1.1",
+    # robosuite 1.5.1 breaks on mujoco 3.10's mj_fullM signature; pin to conda's.
+    "mujoco==3.3.2",
+]
+
+[tool.setuptools.packages.find]
+include = ["resfit*"]
