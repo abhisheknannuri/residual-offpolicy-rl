@@ -149,3 +149,24 @@ python resfit/rl_finetuning/scripts/train_residual_td3.py \
   wandb.continue_run_id=1wrldnus
 
 ```
+
+
+
+
+
+### If you get any issues
+
+```sh
+# 1. Clear out any traces of the old broken torch packages
+pip uninstall torch torchvision torchaudio -y
+conda uninstall torch torchvision torchaudio -y
+pip cache purge
+
+# 2. Install the PyTorch build matched to CUDA 12.8
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+```
+
+then run 
+```sh
+python -c "import torch; print(torch.cuda.is_available()); print(torch.version.cuda)"
+```

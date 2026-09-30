@@ -101,10 +101,16 @@ Top 10 longest episodes: [(259, 313), (241, 303), (79, 269), (236, 234), (99, 21
 # print_can_reward_numeric_summary(reward_scale=1.0, single_object_mode=2)
 
 
-import inspect
-from robosuite.environments.manipulation import Lift
+# import inspect
+# from robosuite.environments.manipulation import Lift
 
-reward_run = inspect.getsource(Lift.reward)
+# reward_run = inspect.getsource(Lift.reward)
 
-print("=== Lift.reward ===")
-print(reward_run)
+# print("=== Lift.reward ===")
+# print(reward_run)
+
+
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
+
+# This downloads and properly builds the local folder structure
+dataset = LeRobotDataset("poolvarine/SARM-robosuite-can-mh-stages")
