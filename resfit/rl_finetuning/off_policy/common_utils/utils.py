@@ -4,6 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 from __future__ import annotations
 
+import ast
 import re
 
 import numpy as np
@@ -181,18 +182,48 @@ class TruncatedNormal(pyd.Normal):
         return x
 
 
+def parse_float_or_array(val_str: str):
+    try:
+        val = ast.literal_eval(val_str)
+        if isinstance(val, list):
+            return np.array(val, dtype=np.float32)
+        return float(val)
+    except Exception:
+        return float(val_str)
+
+def to_native_list(val):
+    """
+    Safely converts strings and OmegaConf ListConfigs into native Python lists.
+    """
+    if hasattr(val, '__iter__') and not isinstance(val, str):
+        return list(val)
+    if isinstance(val, str):
+        try:
+            return ast.literal_eval(val)
+        except Exception:
+            pass
+    return val
+
 def schedule(schdl, step):
     try:
-        return float(schdl)
+        return parse_float_or_array(str(schdl))
     except ValueError:
         match = re.match(r"linear\((.+),(.+),(.+)\)", schdl)
         if match:
-            init, final, duration = [float(g) for g in match.groups()]
+            init_str, final_str, duration_str = match.groups()
+            init = parse_float_or_array(init_str)
+            final = parse_float_or_array(final_str)
+            duration = float(duration_str)
             mix = np.clip(step / duration, 0.0, 1.0)
             return (1.0 - mix) * init + mix * final
         match = re.match(r"step_linear\((.+),(.+),(.+),(.+),(.+)\)", schdl)
         if match:
-            init, final1, duration1, final2, duration2 = [float(g) for g in match.groups()]
+            init_str, final1_str, dur1_str, final2_str, dur2_str = match.groups()
+            init = parse_float_or_array(init_str)
+            final1 = parse_float_or_array(final1_str)
+            final2 = parse_float_or_array(final2_str)
+            duration1 = float(dur1_str)
+            duration2 = float(dur2_str)
             if step <= duration1:
                 mix = np.clip(step / duration1, 0.0, 1.0)
                 return (1.0 - mix) * init + mix * final1

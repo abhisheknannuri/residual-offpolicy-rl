@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import NamedTuple
 
 import torch
+from resfit.rl_finetuning.off_policy.common_utils.utils import to_native_list
 
 
 class ActionScaler:
@@ -52,23 +53,29 @@ class ActionScaler:
             device: Device to place tensors on
         """
         self.device = torch.device(device)
-        self.action_scale = action_scale
-        self.min_range_per_dim = min_range_per_dim
+        self.action_scale = action_scale # from .sh it is 0.2 and default is 0.1
+        self.min_range_per_dim = min_range_per_dim # default ad from .sh is 0.1
 
         # Move inputs to device
-        action_min = action_min.to(self.device)
-        action_max = action_max.to(self.device)
+        action_min = action_min.to(self.device) # 7d array
+        action_max = action_max.to(self.device) # 7d array
+
+        # Handle action scale (could be string, list, ListConfig, float, int)
+        self.action_scale = to_native_list(self.action_scale)
+
+        if isinstance(self.action_scale, (list, tuple)):
+            self.action_scale = torch.tensor(self.action_scale, device=self.device, dtype=torch.float32)
 
         # Compute action center and half-range
-        action_mid = (action_min + action_max) / 2
-        action_half_range = (action_max - action_min) / 2
+        action_mid = (action_min + action_max) / 2 # 7d array
+        action_half_range = (action_max - action_min) / 2 # 7d array
 
         # Apply safeguard: ensure minimum range to prevent normalization blow-up
-        min_half_range = torch.tensor(min_range_per_dim / 2, device=self.device)
-        action_half_range = torch.maximum(action_half_range, min_half_range)
+        min_half_range = torch.tensor(min_range_per_dim / 2, device=self.device) # scalar. it is 0.1/2=0.05
+        action_half_range = torch.maximum(action_half_range, min_half_range) # 7d array
 
         # Expand the range by action_scale factor
-        expanded_half_range = action_half_range * (1 + action_scale)
+        expanded_half_range = action_half_range * (1 + self.action_scale) # 7d array. it is [7D] * 1.2 = [7D]
 
         # Store the final limits
         self._limits = self.Limits(
@@ -81,6 +88,8 @@ class ActionScaler:
         self._range = torch.maximum(self._range, torch.tensor(1e-8, device=self.device))
 
         print("ActionScaler initialized:")
+        print(f"  Original min: {action_min.tolist()}")
+        print(f"  Original max: {action_max.tolist()}")
         print(f"  Original range: [{action_min.min():.4f}, {action_max.max():.4f}]")
         print(f"  Expanded range: [{self._limits.min.min():.4f}, {self._limits.max.max():.4f}]")
         print(f"  Action scale factor: {action_scale}")
@@ -166,7 +175,12 @@ class ActionScaler:
         """
         action_min = torch.tensor(action_stats["min"], dtype=torch.float32)
         action_max = torch.tensor(action_stats["max"], dtype=torch.float32)
-
+        print("[DEBUG]="*50)
+        print("[DEBUG] Action min:", action_min)
+        print("[DEBUG] Action max:", action_max)
+        print("[DEBUG] Action scale:", action_scale)
+        print("[DEBUG] Min range per dim:", min_range_per_dim)
+        print("[DEBUG]="*50)
         return cls(
             action_min=action_min,
             action_max=action_max,

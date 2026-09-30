@@ -451,6 +451,55 @@ class QAgent(nn.Module):
 
         return actor_loss_total, actor_loss_base, combined_action, action_pred, action_l2_penalty
 
+    def _compute_actor_td3_bc_loss(self, obs: dict[str, torch.Tensor], target_action: torch.Tensor, alpha: float):
+        assert "feat" in obs, "safety check"
+
+        # 1. Get the Actor's deterministic prediction
+        action_pred: torch.Tensor = self._act_default(
+            obs=obs,
+            eval_mode=False,
+            stddev=0.0,  # Correct: TD3 actor is deterministic
+            clip=self.cfg.stddev_clip,
+            use_target=False,
+        )
+
+        # 2. Add L2 regularization on action magnitude
+        action_l2_penalty = self.cfg.actor.action_l2_reg_weight * torch.mean(torch.sum(action_pred**2, dim=-1))
+
+        # 3. Create the full actions for both the PREDICTION and the DATASET TARGET
+        if self.residual_actor:
+            combined_action = torch.clamp(obs["observation.base_action"] + action_pred, -1.0, 1.0)
+            target_combined_action = target_action  # target_action is ALREADY the full ground truth action!
+            
+            # To train the BC loss, we must compare the predicted residual (action_pred) 
+            # against the TRUE target residual: (Full Target Action - Base Action)
+            target_residual = torch.clamp(target_action - obs["observation.base_action"], -1.0, 1.0)
+        else:
+            combined_action = action_pred
+            target_combined_action = target_action
+            target_residual = target_action
+
+        # 4. Compute Q-values for the Actor's prediction (Used for gradient ascent)
+        q = self.critic.q_value_for_policy(obs["feat"], obs["observation.state"], combined_action)
+        
+        # 5. Compute Q-values for the offline Dataset action (Used ONLY for lambda scaling)
+        with torch.no_grad():
+            q_target = self.critic.q_value_for_policy(obs["feat"], obs["observation.state"], target_combined_action)
+        
+        # 6. Calculate dynamic lambda using the DATASET's Q-values!
+        lmbda = alpha / q_target.abs().mean().clamp(min=1e-5)
+
+        # 7. Q maximization loss (scaled by lambda)
+        actor_loss_q = - (lmbda * q).mean()  # No need for .detach() on lmbda since we used torch.no_grad()
+
+        # 8. Behavior Cloning penalty (applied strictly to the residual)
+        bc_loss = torch.nn.functional.mse_loss(action_pred, target_residual)
+
+        # 9. Total Loss
+        actor_loss_total = actor_loss_q + bc_loss + action_l2_penalty
+
+        return actor_loss_total, actor_loss_q, bc_loss, lmbda, combined_action, action_pred, action_l2_penalty
+
     def _compute_actor_bc_loss(self, batch, *, backprop_encoder):
         assert not self.residual_actor, "Not implemented"
         obs: dict[str, torch.Tensor] = batch["obs"]
@@ -532,6 +581,104 @@ class QAgent(nn.Module):
 
         self.actor_opt.step()
 
+        return metrics
+
+    def update_actor_offline(self, obs: dict[str, torch.Tensor], target_action: torch.Tensor, alpha: float):
+        # NOTE: actor loss does not backprop into the encoder to avoid inplace errors
+        # since the encoder was just updated in the critic step.
+        if "feat" in obs:
+            obs["feat"] = obs["feat"].detach()
+
+        (
+            actor_loss_total,
+            actor_loss_q,
+            bc_loss,
+            lmbda,
+            combined_action,
+            action_pred,
+            action_l2_penalty,
+        ) = self._compute_actor_td3_bc_loss(obs, target_action, alpha)
+        
+        self.actor_opt.zero_grad()
+        actor_loss_total.backward()
+        
+        actor_grad_norm = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.cfg.actor_grad_clip_norm)
+        self.actor_opt.step()
+        
+        # Soft update the target actor (crucial for TD3 next-state evaluations)
+        utils.soft_update_params(self.actor, self.actor_target, self.cfg.critic_target_tau)
+        
+        # ------------------------------------------------------------------
+        # Diagnostic metrics for debugging offline RL
+        # ------------------------------------------------------------------
+        with torch.no_grad():
+            base_action = obs["observation.base_action"]
+            
+            # Target residual: what the actor SHOULD output to match GT
+            target_residual = target_action - base_action
+            
+            # How much of target_residual is beyond the actor's action_scale range?
+            action_scale = self.actor.action_scale_tensor
+            exceeds_scale = (target_residual.abs() > action_scale).float()
+            
+            # Q-values for the actor's combined action vs the GT action
+            q_actor = self.critic.q_value_for_policy(obs["feat"], obs["observation.state"], combined_action)
+            q_gt = self.critic.q_value_for_policy(obs["feat"], obs["observation.state"], target_action)
+        
+        metrics = {
+            # Original losses
+            "train_offline/actor_loss_total": actor_loss_total.item(),
+            "train_offline/actor_loss_q": actor_loss_q.item(),
+            "train_offline/bc_loss": bc_loss.item(),
+            "train_offline/lambda": lmbda.item(),
+            "train_offline/actor_l2_penalty": action_l2_penalty.item(),
+            "train_offline/actor_grad_norm": actor_grad_norm.item(),
+            
+            # --- Actor predicted residual (action_pred) ---
+            "debug_offline/action_pred_mean": action_pred.mean().item(),
+            "debug_offline/action_pred_std": action_pred.std().item(),
+            "debug_offline/action_pred_abs_mean": action_pred.abs().mean().item(),
+            "debug_offline/action_pred_min": action_pred.min().item(),
+            "debug_offline/action_pred_max": action_pred.max().item(),
+            
+            # --- Target residual (GT - base_action): what actor SHOULD output ---
+            "debug_offline/target_residual_mean": target_residual.mean().item(),
+            "debug_offline/target_residual_std": target_residual.std().item(),
+            "debug_offline/target_residual_abs_mean": target_residual.abs().mean().item(),
+            "debug_offline/target_residual_min": target_residual.min().item(),
+            "debug_offline/target_residual_max": target_residual.max().item(),
+            
+            # --- What % of target residual dimensions exceed action_scale? ---
+            "debug_offline/pct_target_exceeds_scale": exceeds_scale.mean().item() * 100.0,
+            
+            # --- Base action stats ---
+            "debug_offline/base_action_mean": base_action.mean().item(),
+            "debug_offline/base_action_std": base_action.std().item(),
+            "debug_offline/base_action_abs_mean": base_action.abs().mean().item(),
+            
+            # --- GT action (target_action) stats ---
+            "debug_offline/gt_action_mean": target_action.mean().item(),
+            "debug_offline/gt_action_std": target_action.std().item(),
+            "debug_offline/gt_action_abs_mean": target_action.abs().mean().item(),
+            
+            # --- Combined action (base + pred residual) stats ---
+            "debug_offline/combined_action_mean": combined_action.mean().item(),
+            "debug_offline/combined_action_std": combined_action.std().item(),
+            "debug_offline/combined_action_abs_mean": combined_action.abs().mean().item(),
+            
+            # --- Q-values: actor's action vs GT action ---
+            "debug_offline/q_actor_combined": q_actor.mean().item(),
+            "debug_offline/q_gt_action": q_gt.mean().item(),
+            "debug_offline/q_gap_gt_minus_actor": (q_gt - q_actor).mean().item(),
+            
+            # --- Per-dimension MSE between action_pred and target_residual ---
+            "debug_offline/per_dim_mse": ((action_pred - target_residual) ** 2).mean(dim=0).mean().item(),
+            
+            # --- Residual error: how far is combined_action from GT? ---
+            "debug_offline/combined_vs_gt_mse": ((combined_action - target_action) ** 2).mean().item(),
+            "debug_offline/combined_vs_gt_abs_mean": (combined_action - target_action).abs().mean().item(),
+        }
+        
         return metrics
 
     def update_actor_rft(

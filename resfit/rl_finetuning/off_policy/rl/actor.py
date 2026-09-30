@@ -7,6 +7,7 @@ from torch import nn
 
 from resfit.rl_finetuning.config.rlpd import ActorConfig
 from resfit.rl_finetuning.off_policy.common_utils import utils
+from resfit.rl_finetuning.off_policy.common_utils.utils import to_native_list
 
 
 def build_fc(in_dim, hidden_dim, action_dim, num_layer, layer_norm, dropout, use_layer_norm=True):
@@ -114,6 +115,14 @@ class Actor(nn.Module):
         # Apply weight initialization
         self._initialize_weights(cfg)
 
+        # Handle action scale (could be string, list, ListConfig, float, int)
+        act_scale = to_native_list(cfg.action_scale)
+        if isinstance(act_scale, (list, tuple)):
+            scale_t = torch.tensor(act_scale, dtype=torch.float32)
+        else:
+            scale_t = torch.tensor([act_scale], dtype=torch.float32)
+        self.register_buffer("action_scale_tensor", scale_t)
+
     def _initialize_weights(self, cfg: ActorConfig):
         """Apply weight initialization to all networks."""
         # Determine initialization distributions
@@ -169,7 +178,10 @@ class Actor(nn.Module):
 
         # Scale the mean by action_scale
         # NOTE: std is already in environment action space (more interpretable)
-        scaled_mu = mu * self.cfg.action_scale
+        scaled_mu = mu * self.action_scale_tensor
+
+        if not isinstance(std, torch.Tensor):
+            std = torch.tensor(std, device=scaled_mu.device, dtype=scaled_mu.dtype)
 
         # Create distribution with scaled mean but environment-scale std
         action_dist = utils.TruncatedNormal(scaled_mu, std)

@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from hydra.core.config_store import ConfigStore
 from torch import nn
@@ -84,9 +85,8 @@ class ActorConfig:
     # Options: 'default', 'normal', 'orthogonal', 'xavier_uniform'
     # 'default' uses PyTorch's default initialization
     actor_intermediate_layer_init_distribution: str = "default"
-    # L2 regularization weight on action magnitude
     action_l2_reg_weight: float = 0.0
-    action_scale: float = 1.0
+    action_scale: Any = 1.0
     # Number of hidden layers in the actor MLP (default 2 for backwards compatibility)
     num_layers: int = 2
     # Layer normalization control
@@ -165,6 +165,19 @@ class RLPDAlgoConfig:
     n_step: int = 3
 
     # ------------------------------------------------------------------
+    # Terminated-only bootstrapping (time-limit bug fix) ---------------
+    # ------------------------------------------------------------------
+    # When False (default) the n-step bootstrap mask uses ``done`` (= terminated | truncated),
+    # which cuts bootstrapping on time-limit truncation (the classic "time-limit bug").
+    # This preserves the original/validated sparse ResFiT behaviour byte-for-byte.
+    # When True, the bootstrap mask uses ``terminated`` only: on truncation the critic
+    # correctly bootstraps the value of the (true) final state, while trajectory
+    # segmentation and reward accumulation still respect ``done``. Required for the
+    # stage-aware PBRS reward to telescope correctly. Needs ``next.terminated`` stored
+    # in the replay buffer (added unconditionally by the collection code).
+    terminated_only_bootstrap: bool = False
+
+    # ------------------------------------------------------------------
     # Critic warmup phase ----------------------------------------------
     # ------------------------------------------------------------------
     # Number of critic-only updates before training the actor
@@ -186,7 +199,7 @@ class RLPDAlgoConfig:
     # ------------------------------------------------------------------
     # Scale for random action noise during initial exploration phase
     # Actions are sampled as: rand_actions = torch.rand(...) * 2 * random_action_noise_scale - random_action_noise_scale
-    random_action_noise_scale: float = 1.0  # Default: uniform in [-1, 1]
+    random_action_noise_scale: Any = 1.0  # Default: uniform in [-1, 1]
 
     # ------------------------------------------------------------------
     # Sampling strategy -------------------------------------------------
@@ -206,8 +219,8 @@ class RLPDAlgoConfig:
     # ------------------------------------------------------------------
     # Standard deviation schedule -------------------------------------------
     # ------------------------------------------------------------------
-    stddev_max: float = 0.1
-    stddev_min: float = 0.1
+    stddev_max: Any = 0.1
+    stddev_min: Any = 0.1
     stddev_step: int = 300_000
 
     stddev_schedule: str = field(init=False)
@@ -258,6 +271,7 @@ class RLPDDexmgConfig:
     num_envs: int = 1
     eval_num_envs: int = 4
     eval_num_episodes: int = 50
+    eval_horizon: int | None = None
     # headless=True  → EGL offscreen rendering (fast, no display needed)
     # headless=False → GLFW on-screen MuJoCo viewer window (slower, for visualization)
     headless: bool = True

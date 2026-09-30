@@ -4,7 +4,16 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 from pathlib import Path
+
+# Prefer a working system ffmpeg over imageio-ffmpeg's bundled binary, which can
+# fail to launch in fresh envs and then block get_ffmpeg_exe() on a download.
+if not os.environ.get("IMAGEIO_FFMPEG_EXE"):
+    _sys_ffmpeg = shutil.which("ffmpeg")
+    if _sys_ffmpeg:
+        os.environ["IMAGEIO_FFMPEG_EXE"] = _sys_ffmpeg
 
 import imageio
 import matplotlib
@@ -190,6 +199,41 @@ def run_dexmg_evaluation(
 
         return log_payload
 
+    def _extract_final_info_for_env(infos: dict, env_idx: int) -> dict:
+        """Extract per-env terminal info from Gymnasium vectorized info.
+
+        Supports both list-like and dict-of-stacked-fields final_info formats.
+        """
+        final_infos = infos.get("final_info", None)
+        if final_infos is None:
+            return {}
+
+        if isinstance(final_infos, (list, tuple)):
+            if 0 <= env_idx < len(final_infos):
+                raw = final_infos[env_idx]
+                if isinstance(raw, dict):
+                    return raw
+            return {}
+
+        if isinstance(final_infos, dict):
+            final_mask = infos.get("_final_info", None)
+            if final_mask is not None:
+                try:
+                    if not bool(final_mask[env_idx]):
+                        return {}
+                except Exception:
+                    return {}
+
+            out: dict[str, object] = {}
+            for k, v in final_infos.items():
+                try:
+                    out[k] = v[env_idx]
+                except Exception:
+                    continue
+            return out
+
+        return {}
+
     # ------------------------------------------------------------------
     # Initial setup -----------------------------------------------------
     # ------------------------------------------------------------------
@@ -245,7 +289,7 @@ def run_dexmg_evaluation(
         # --------------------------------------------------------------
         # 2. Environment step ------------------------------------------
         # --------------------------------------------------------------
-        next_obs, reward, terminated, truncated, _ = env.step(actions)
+        next_obs, reward, terminated, truncated, infos = env.step(actions)
         done_flags = terminated | truncated
 
         # Capture frames ------------------------------------------------
@@ -261,13 +305,17 @@ def run_dexmg_evaluation(
             ep_rewards[env_idx].append(reward[env_idx].item())
             ep_q_preds[env_idx].append(q_pred[env_idx].item())
 
-            # Track if task succeeded at any point during this episode
-            if reward[env_idx].item() == 1.0:
-                ep_ever_succeeded[env_idx] = True
-                if ep_first_success_step[env_idx] is None:
-                    ep_first_success_step[env_idx] = len(ep_rewards[env_idx])
-
             if done_flags[env_idx]:
+                # Success always causes terminated=True (set by RobosuiteGymWrapper / RewardManipulationWrapper).
+                # With gymnasium SAME_STEP autoreset the terminal-step info is stored in
+                # infos["final_info"][env_idx], not in the top-level infos dict.
+                ep_info = _extract_final_info_for_env(infos, env_idx)
+                if bool(ep_info.get("success", False)):
+                    ep_ever_succeeded[env_idx] = True
+                    if ep_first_success_step[env_idx] is None:
+                        ep_first_success_step[env_idx] = len(ep_rewards[env_idx])
+
+
                 # Episode finished -- aggregate results ----------------
                 ep_return = float(sum(ep_rewards[env_idx]))
                 is_success = ep_ever_succeeded[env_idx]
@@ -366,16 +414,13 @@ def run_dexmg_evaluation(
         "eval/mean_first_success_step": mean_first_success_step,
     }
 
-    if wandb.run is not None:
-        wandb_log = dict(metrics)
-        wandb_log.update(
-            _build_eval_episode_length_log(
-                episode_lengths=all_episode_lengths,
-                successes=successes,
-                horizon=getattr(env, "horizon", None),
-            )
+    metrics.update(
+        _build_eval_episode_length_log(
+            episode_lengths=all_episode_lengths,
+            successes=successes,
+            horizon=getattr(env, "horizon", None),
         )
-        wandb.log(wandb_log, step=global_step)
+    )
 
     # ------------------------------------------------------------------
     # 5. Q-trajectory plots --------------------------------------------
@@ -395,9 +440,36 @@ def run_dexmg_evaluation(
             global_step=global_step,
         )
 
-        # Log to W&B if available
+        # Save the exact data to a JSON file for easy downstream analysis
+        import json
+        data_name = f"eval_q_trajectories_{run_name}_step_{global_step if global_step is not None else 'NA'}.json"
+        data_path = parent / data_name
+        
+        dump_data = {
+            "global_step": global_step,
+            "episodes": [
+                {
+                    "episode_idx": i + 1,
+                    "success": successes[i],
+                    "length": all_episode_lengths[i],
+                    "q_trajectory": all_q_trajectories[i]
+                }
+                for i in range(len(successes))
+            ]
+        }
+        try:
+            with open(data_path, "w") as f:
+                json.dump(dump_data, f, indent=2)
+            print(f"Saved Q-trajectory data to: {data_path}")
+            
+            # Save it to W&B directly so you can download it from the dashboard!
+            if wandb.run is not None:
+                wandb.save(str(data_path), base_path=str(parent.parent))
+        except Exception as e:
+            print(f"Failed to save JSON data: {e}")
+
         if wandb.run is not None:
-            wandb.log({"value/q_trajectories": wandb.Image(str(plot_path))}, step=global_step)
+            metrics["value/q_trajectories"] = wandb.Image(str(plot_path))
 
     # ------------------------------------------------------------------
     # 6. Video dump + W&B logging --------------------------------------
@@ -417,7 +489,7 @@ def run_dexmg_evaluation(
         writer.close()
 
         if wandb.run is not None:
-            wandb.log({"eval/video": wandb.Video(str(video_path), format="mp4")}, step=global_step)
+            metrics["eval/video"] = wandb.Video(str(video_path), format="mp4")
 
     # Restore training mode --------------------------------------------
     agent.train(True)

@@ -92,6 +92,7 @@ class RobosuiteGymWrapper:
         env_id: int = 0,
         headless: bool = True,
         reward_shaping: bool = False,
+        horizon: int | None = None,
     ):
         # ------------------------------------------------------------------
         # Allow common aliases used in the Robomimic literature.
@@ -125,24 +126,23 @@ class RobosuiteGymWrapper:
             self.render_size = render_size
         self.env_id = env_id
 
-        # ------------------------------------------------------------------
-        # Episode horizon -- override for some long-running DexMimicGen tasks.
-        # For all other tasks we fall back to robosuite's default of 1000.
-        # ------------------------------------------------------------------
-        self.horizon = {
-            "Lift": 100,
-            "PickPlaceCan": 200,
-            "NutAssemblySquare": 300,
-            "Threading": 500,
-            "TwoArmTransport": 800,
-            "TwoArmBoxCleanup": 300,
-            "TwoArmCoffee": 400,
-            "TwoArmLiftTray": 650,
-            "TwoArmPouring": 400,
-            "TwoArmThreePieceAssembly": 500,
-            "TwoArmThreading": 300,
-            "TwoArmCanSortRandom": 400,
-        }.get(env_name, 1000)
+        if horizon is not None:
+            self.horizon = horizon
+        else:
+            self.horizon = {
+                "Lift": 100,
+                "PickPlaceCan": 200,
+                "NutAssemblySquare": 300,
+                "Threading": 500,
+                "TwoArmTransport": 800,
+                "TwoArmBoxCleanup": 300,
+                "TwoArmCoffee": 400,
+                "TwoArmLiftTray": 650,
+                "TwoArmPouring": 400,
+                "TwoArmThreePieceAssembly": 500,
+                "TwoArmThreading": 300,
+                "TwoArmCanSortRandom": 400,
+            }.get(env_name, 1000)
 
         # Add Gymnasium-required attributes
         self.metadata = {"render_modes": ["rgb_array"], "render_fps": 20, "horizon": self.horizon}
@@ -227,6 +227,25 @@ class RobosuiteGymWrapper:
         if num_envs != 1:
             raise ValueError("This wrapper is for 1 env, multiple envs are supported by the vectorized env wrapper")
 
+        self.stage_reset = os.environ.get("STAGE_RESET", "0") == "1"
+        if self.stage_reset and self.env_name == "NutAssemblySquare":
+            npz_path = "/home/qte9489/personal_abhi/Thesis-Docs/Reward_Func/reward_func_ws/RLRewardResearchWS/DatasetUtil/NutSquare/stage_start_states.npz"
+            if not os.path.exists(npz_path):
+                npz_path = os.path.join(os.path.dirname(__file__), "stage_start_states.npz")
+            if os.path.exists(npz_path):
+                logger.info(f"[RobosuiteGymWrapper] Loading stage reset states from {npz_path}")
+                data = np.load(npz_path, allow_pickle=True)
+                # Full flattened MuJoCo sim states (arm + gripper + both nuts), shape (N, 45).
+                self.stage_states = data["states"]
+                self.num_stage_states = self.stage_states.shape[0]
+                # Reduce horizon for the stage-reset placement task
+                self.horizon = 120
+                self.metadata["horizon"] = 120
+                self.env.horizon = 120
+            else:
+                logger.error(f"[RobosuiteGymWrapper] stage_start_states.npz not found at {npz_path}! Disabling stage reset.")
+                self.stage_reset = False
+
         # Define action and observation spaces after environment creation
         self._setup_spaces()
 
@@ -294,13 +313,55 @@ class RobosuiteGymWrapper:
 
     def reset(self, *, seed=None, options=None):
         """Reset the environment and return initial observation."""
+        if seed is not None:
+            np.random.seed(seed)
+            import random
+            random.seed(seed)
+            import torch
+            torch.manual_seed(seed)
         # Gymnasium interface: reset can accept seed and options
         # For robosuite environments, we'll ignore these for now
         obs = self.env.reset()
+
+        if getattr(self, "stage_reset", False) and self.env_name == "NutAssemblySquare":
+            # Restore a full, pre-validated MuJoCo sim state so the robot starts
+            # already grasping the lifted nut near the peg. States were pre-filtered
+            # for stability with zeroed velocities, so restoring is deterministic
+            # (no piecewise pose reconstruction, no settling steps needed).
+            peg_xy = np.array([0.23, 0.1])
+            lift_z, near_min, near_max = 0.90, 0.03, 0.15
+
+            def _stage_valid():
+                p = self.env.sim.data.get_joint_qpos("SquareNut_joint0")[:3]
+                dist = np.linalg.norm(p[:2] - peg_xy)
+                grasped = self.env._check_grasp(
+                    gripper=self.env.robots[0].gripper,
+                    object_geoms=[g for g in self.env.nuts[0].contact_geoms],
+                )
+                return (p[2] > lift_z) and (near_min < dist < near_max) and grasped
+
+            max_retries = 100
+            success = False
+            for attempt in range(max_retries):
+                idx = np.random.randint(0, self.num_stage_states)
+                self.env.sim.set_state_from_flattened(self.stage_states[idx])
+                self.env.sim.data.qvel[:] = 0.0
+                self.env.sim.forward()
+                self.env.robots[0].composite_controller.reset()
+                if _stage_valid():
+                    success = True
+                    break
+            if not success:
+                logger.warning("[RobosuiteGymWrapper] Failed to secure a valid stage reset after maximum retries. Proceeding anyway.")
+
+            # Recalculate observations. force_update=True is REQUIRED: _get_observations()
+            # otherwise returns the cached obs from env.reset() (arm home / nut on table),
+            # not the restored grasp state, which feeds the policy a stale image.
+            obs = self.env._get_observations(force_update=True)
+
         processed_obs = self._process_obs(obs)
         self._last_obs = processed_obs  # Store for video recording
         self.episode_steps = 0
-        self._ever_succeeded = False
         return processed_obs, {}
 
     def step(self, action):
@@ -320,29 +381,22 @@ class RobosuiteGymWrapper:
         # Return scalar values - Gymnasium will handle device placement and batching in vectorized env
         reward_scalar = float(reward)
 
-        # Track whether the task was ever completed during this episode
-        if reward == 1.0:
-            self._ever_succeeded = True
+        raw_dense_reward = reward_scalar
+        is_success = bool(self.env._check_success())
+        terminated_scalar = is_success
+        truncated_scalar = bool(done) and not terminated_scalar
 
-        # With reward_shaping, do NOT terminate on success — let the episode
-        # run to the horizon so the agent collects reward=1.0 every post-success
-        # step. This ensures success gives higher return than failure.
-        # With sparse reward, terminate immediately on success (original behavior).
-        if self.reward_shaping:
-            terminated_scalar = False
-            truncated_scalar = bool(done)  # Only horizon timeout ends the episode
-        else:
-            terminated_scalar = bool(reward == 1.0)
-            truncated_scalar = bool(done)
+        info = dict(info)
+        info.setdefault("robosuite_dense_reward", raw_dense_reward)
+        info["success"] = is_success
+        info["succeed"] = is_success
+        info["is_success"] = is_success
+        info["episode_steps"] = self.episode_steps
 
         if terminated_scalar or truncated_scalar:
-            info = {
-                **info,
-                "success": self._ever_succeeded,
-                "episode_steps": self.episode_steps,
-            }
+            if terminated_scalar:
+                info["num_of_remaining_horizon_steps"] = max(self.horizon - self.episode_steps, 0)
             self.episode_steps = 0
-            self._ever_succeeded = False
 
         return processed_obs, reward_scalar, terminated_scalar, truncated_scalar, info
 
@@ -572,6 +626,117 @@ class RobosuiteGymWrapper:
         setattr(self, name, value)
 
 
+class RewardManipulationWrapper:
+    """Post-step reward / termination manipulations on top of RobosuiteGymWrapper.
+
+    This wrapper is intentionally separate from `RobosuiteGymWrapper` so the base
+    behavior remains unchanged. It can be used to:
+    1) Force terminate on success in both sparse and dense settings.
+    2) Apply an optional dense-success jackpot multiplier.
+    """
+
+    def __init__(
+        self,
+        env,
+        terminate_on_success: bool = False,
+        dense_success_bonus_scale: float | None = None,
+        reward_shaping: bool | None = None,
+    ):
+        self.env = env
+        self.terminate_on_success = terminate_on_success
+        self.dense_success_bonus_scale = dense_success_bonus_scale
+
+        if reward_shaping is None:
+            reward_shaping = bool(getattr(env, "reward_shaping", False))
+        self.reward_shaping = bool(reward_shaping)
+        print(f"Initialized RewardManipulationWrapper with terminate_on_success={self.terminate_on_success}, "f"dense_success_bonus_scale={self.dense_success_bonus_scale}, reward_shaping={self.reward_shaping}")
+
+    def reset(self, *args, **kwargs):
+        return self.env.reset(*args, **kwargs)
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+
+        reward_scalar = float(reward)
+        info = dict(info)
+        is_success = self._is_success(reward_scalar, info)
+
+        # Optional jackpot bonus for dense rewards (reward_shaping=True).
+        if (
+            self.reward_shaping
+            and self.dense_success_bonus_scale is not None
+            and is_success
+        ):
+            reward_scalar *= float(self.dense_success_bonus_scale)
+            print(f"Applied dense success bonus: new reward {reward_scalar} (original {reward})")
+
+        if self.terminate_on_success and is_success:
+            terminated = True
+            truncated = False
+
+        info["success"] = bool(info.get("success", False) or is_success)
+        info["original_reward"] = reward
+        info["overridden_reward"] = reward_scalar
+
+        return obs, reward_scalar, bool(terminated), bool(truncated), info
+
+    def _is_success(self, reward: float, info: dict) -> bool:
+        """Infer task success from wrapper info or robosuite's success check."""
+        if "success" in info:
+            return bool(info["success"])
+
+        base_env = getattr(self.env, "env", None)
+        if base_env is not None and hasattr(base_env, "_check_success"):
+            try:
+                return bool(base_env._check_success())
+            except Exception:  # pragma: no cover - defensive fallback
+                pass
+
+        return False
+
+    def render(self):
+        return self.env.render()
+
+    def render_viewer(self):
+        if hasattr(self.env, "render_viewer"):
+            return self.env.render_viewer()
+        return None
+
+    def set_video_key(self, video_key: str):
+        if hasattr(self.env, "set_video_key"):
+            return self.env.set_video_key(video_key)
+        setattr(self.env, "video_key", video_key)
+        return None
+
+    def close(self):
+        return self.env.close()
+
+    @property
+    def unwrapped(self):
+        return getattr(self.env, "unwrapped", self.env)
+
+    def get_wrapper_attr(self, name: str):
+        if hasattr(self, name):
+            return getattr(self, name)
+        if hasattr(self.env, "get_wrapper_attr"):
+            return self.env.get_wrapper_attr(name)
+        if hasattr(self.env, name):
+            return getattr(self.env, name)
+        raise AttributeError(f"{type(self).__name__} has no attribute '{name}'")
+
+    def set_wrapper_attr(self, name: str, value):
+        if hasattr(self, name):
+            setattr(self, name, value)
+            return
+        if hasattr(self.env, "set_wrapper_attr"):
+            self.env.set_wrapper_attr(name, value)
+            return
+        setattr(self.env, name, value)
+
+    def __getattr__(self, name):
+        return getattr(self.env, name)
+
+
 def make_dexmimicgen_env(
     env_name: str,
     camera_size: int = 84,
@@ -580,11 +745,16 @@ def make_dexmimicgen_env(
     env_id: int = 0,
     headless: bool = True,
     reward_shaping: bool = False,
+    use_reward_manipulation_wrapper: bool = False,
+    terminate_on_success: bool = False,
+    dense_success_bonus_scale: float | None = None,
+    reward_model_cfg: dict | None = None,
+    horizon: int | None = None,
 ):
     """Factory function to create a DexMimicGen environment for vectorization."""
 
     def _make():
-        return RobosuiteGymWrapper(
+        env = RobosuiteGymWrapper(
             env_name=env_name,
             num_envs=1,
             render_gpu_device_id=render_gpu_device_id,
@@ -593,7 +763,50 @@ def make_dexmimicgen_env(
             env_id=env_id,
             headless=headless,
             reward_shaping=reward_shaping,
+            horizon=horizon,
         )
+
+        if use_reward_manipulation_wrapper:
+            env = RewardManipulationWrapper(
+                env,
+                terminate_on_success=terminate_on_success,
+                dense_success_bonus_scale=dense_success_bonus_scale,
+                reward_shaping=reward_shaping,
+            )
+
+        # Optional stage-aware PBRS reward driven by an external reward model.
+        if reward_model_cfg is not None and reward_model_cfg.get("enabled", False):
+            # Imported lazily so the reward-model deps are only required when used
+            # (and so this module stays importable in eval-only contexts).
+            from resfit.rl_finetuning.reward_models.reward_client import RewardModelClient
+            from resfit.rl_finetuning.reward_models.pbrs_wrapper import StageAwarePBRSWrapper
+
+            client = RewardModelClient(
+                server_url=reward_model_cfg["server_url"],
+                task_prompt=reward_model_cfg.get("task_prompt", ""),
+                request_timeout_s=reward_model_cfg.get("request_timeout_s", 20.0),
+            )
+            session_id = f"{reward_model_cfg.get('session_prefix', 'resfit')}-env{env_id}"
+            env = StageAwarePBRSWrapper(
+                env,
+                client=client,
+                session_id=session_id,
+                potentials=reward_model_cfg["potentials"],
+                gamma=reward_model_cfg["pbrs_gamma"],
+                query_every_k=reward_model_cfg.get("query_every_k", 5),
+                image_key=reward_model_cfg.get("image_key", "observation.images.agentview"),
+                keep_sparse_term=reward_model_cfg.get("keep_sparse_term", True),
+                hysteresis_k=reward_model_cfg.get("hysteresis_k", 5),
+                conf_threshold=reward_model_cfg.get("conf_threshold", 0.80),
+                monotonic=reward_model_cfg.get("monotonic", True),
+                image_vflip=reward_model_cfg.get("image_vflip", False),
+                task_prompt=reward_model_cfg.get("task_prompt", ""),
+                reward_mode=reward_model_cfg.get("reward_mode", "pbrs"),
+                milestone_payouts=reward_model_cfg.get("milestone_payouts"),
+                milestone_success_bonus=reward_model_cfg.get("milestone_success_bonus", 0.7),
+            )
+
+        return env
 
     return _make
 
@@ -691,6 +904,12 @@ def create_vectorized_env(
     video_key: str = "observation.images.agentview",
     headless: bool = True,
     reward_shaping: bool = False,
+    use_reward_manipulation_wrapper: bool = False,
+    terminate_on_success: bool = False,
+    dense_success_bonus_scale: float | None = None,
+    reward_model_cfg: dict | None = None,
+    force_sync: bool = False,
+    horizon: int | None = None,
 ) -> VectorizedEnvWrapper:
     """Create vectorized environment using Gymnasium's vector environments."""
 
@@ -714,12 +933,34 @@ def create_vectorized_env(
             render_gpu_device_id = visible_device_ids[env_id % num_visible_gpus]
         else:
             render_gpu_device_id = visible_device_ids[0] if visible_device_ids else 0
-        env_fns.append(make_dexmimicgen_env(env_name, camera_size, render_size, render_gpu_device_id, env_id, headless=headless, reward_shaping=reward_shaping))
+        env_fns.append(
+            make_dexmimicgen_env(
+                env_name,
+                camera_size,
+                render_size,
+                render_gpu_device_id,
+                env_id,
+                headless=headless,
+                reward_shaping=reward_shaping,
+                use_reward_manipulation_wrapper=use_reward_manipulation_wrapper,
+                terminate_on_success=terminate_on_success,
+                dense_success_bonus_scale=dense_success_bonus_scale,
+                reward_model_cfg=reward_model_cfg,
+                horizon=horizon,
+            )
+        )
 
-    if debug or not headless:
-        # Use synchronous vectorized environment for debugging or on-screen rendering
-        # (on-screen MuJoCo viewer windows must live in the main process)
-        logger.debug("Using gymnasium.vector.SyncVectorEnv (debug=%s, headless=%s)", debug, headless)
+    if debug or not headless or force_sync:
+        # Use synchronous vectorized environment for debugging, on-screen rendering,
+        # or when an in-process reward-model client is attached (force_sync). The
+        # reward server is queried synchronously per step, so we keep the env in the
+        # main process to avoid spawning per-worker HTTP clients.
+        logger.debug(
+            "Using gymnasium.vector.SyncVectorEnv (debug=%s, headless=%s, force_sync=%s)",
+            debug,
+            headless,
+            force_sync,
+        )
         vec_env = gym.vector.SyncVectorEnv(
             env_fns,
             autoreset_mode=gym.vector.AutoresetMode.SAME_STEP,

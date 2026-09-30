@@ -77,7 +77,8 @@ class DiffusionPolicy(PreTrainedPolicy):
         self.unnormalize_outputs = Unnormalize(config.output_features, config.normalization_mapping, dataset_stats)
 
         # queues are populated during rollout of the policy, they contain the n latest observations and actions
-        self._queues = None
+        self._action_queues = None
+        self._obs_queues = None
 
         self.diffusion = DiffusionModel(config)
 
@@ -86,16 +87,26 @@ class DiffusionPolicy(PreTrainedPolicy):
     def get_optim_params(self) -> dict:
         return self.diffusion.parameters()
 
-    def reset(self):
+    def reset(self, env_ids: list[int] | None = None):
         """Clear observation and action queues. Should be called on `env.reset()`"""
-        self._queues = {
-            "observation.state": deque(maxlen=self.config.n_obs_steps),
-            "action": deque(maxlen=self.config.n_action_steps),
-        }
-        if self.config.image_features:
-            self._queues["observation.images"] = deque(maxlen=self.config.n_obs_steps)
-        if self.config.env_state_feature:
-            self._queues["observation.environment_state"] = deque(maxlen=self.config.n_obs_steps)
+        if env_ids is None:
+            if hasattr(self, "_action_queues") and self._action_queues is not None:
+                for q in self._action_queues:
+                    q.clear()
+            if hasattr(self, "_obs_queues") and self._obs_queues is not None:
+                for obs_q in self._obs_queues:
+                    for q in obs_q.values():
+                        q.clear()
+        else:
+            if hasattr(self, "_action_queues") and self._action_queues is not None:
+                for idx in env_ids:
+                    if idx < len(self._action_queues):
+                        self._action_queues[idx].clear()
+            if hasattr(self, "_obs_queues") and self._obs_queues is not None:
+                for idx in env_ids:
+                    if idx < len(self._obs_queues):
+                        for q in self._obs_queues[idx].values():
+                            q.clear()
 
     @torch.no_grad
     def select_action(self, batch: dict[str, Tensor]) -> Tensor:
@@ -107,36 +118,77 @@ class DiffusionPolicy(PreTrainedPolicy):
             copied `n_obs_steps` times to fill the cache).
           - The diffusion model generates `horizon` steps worth of actions.
           - `n_action_steps` worth of actions are actually kept for execution, starting from the current step.
-        Schematically this looks like:
-            ----------------------------------------------------------------------------------------------
-            (legend: o = n_obs_steps, h = horizon, a = n_action_steps)
-            |timestep            | n-o+1 | n-o+2 | ..... | n     | ..... | n+a-1 | n+a   | ..... | n-o+h |
-            |observation is used | YES   | YES   | YES   | YES   | NO    | NO    | NO    | NO    | NO    |
-            |action is generated | YES   | YES   | YES   | YES   | YES   | YES   | YES   | YES   | YES   |
-            |action is used      | NO    | NO    | NO    | YES   | YES   | YES   | NO    | NO    | NO    |
-            ----------------------------------------------------------------------------------------------
-        Note that this means we require: `n_action_steps <= horizon - n_obs_steps + 1`. Also, note that
-        "horizon" may not the best name to describe what the variable actually means, because this period is
-        actually measured from the first observation which (if `n_obs_steps` > 1) happened in the past.
         """
+        self.eval()
+
+        # Pick any tensor in the batch dictionary to determine the batch dimension. Some entries
+        # (e.g. "observation.images") are *lists* of tensors, so we skip those.
+        batch_size = None
+        for v in batch.values():
+            if isinstance(v, torch.Tensor):
+                batch_size = v.shape[0]
+                break
+        if batch_size is None:
+            # Should never happen- at least one tensor is expected in every batch.
+            raise ValueError("Could not determine batch size from input batch dictionary.")
+
+        # Lazily initialize/resize per-environment queues
+        if self._action_queues is None or len(self._action_queues) < batch_size:
+            self._action_queues = [deque([], maxlen=self.config.n_action_steps) for _ in range(batch_size)]
+            
+            # For observations, we need a list of dict of deques
+            self._obs_queues = []
+            for _ in range(batch_size):
+                obs_q = {}
+                obs_q["observation.state"] = deque(maxlen=self.config.n_obs_steps)
+                if self.config.image_features:
+                    obs_q["observation.images"] = deque(maxlen=self.config.n_obs_steps)
+                if self.config.env_state_feature:
+                    obs_q["observation.environment_state"] = deque(maxlen=self.config.n_obs_steps)
+                self._obs_queues.append(obs_q)
+
+        # Normalize inputs
         batch = self.normalize_inputs(batch)
         if self.config.image_features:
             batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
             batch["observation.images"] = torch.stack([batch[key] for key in self.config.image_features], dim=-4)
-        # Note: It's important that this happens after stacking the images into a single key.
-        self._queues = populate_queues(self._queues, batch)
 
-        if len(self._queues["action"]) == 0:
-            # stack n latest observations from the queue
-            batch = {k: torch.stack(list(self._queues[k]), dim=1) for k in batch if k in self._queues}
-            actions = self.diffusion.generate_actions(batch)
+        # Populate the observation queues for each environment
+        for i in range(batch_size):
+            obs_q = self._obs_queues[i]
+            for key in obs_q:
+                if key not in batch:
+                    continue
+                val = batch[key][i]  # shape: (...) without batch dimension
+                q = obs_q[key]
+                if len(q) != q.maxlen:
+                    while len(q) != q.maxlen:
+                        q.append(val)
+                else:
+                    q.append(val)
 
-            # TODO(rcadene): make above methods return output dictionary?
+        # Find environments needing a new action chunk (empty queue)
+        envs_needing_chunk = [idx for idx, q in enumerate(self._action_queues) if len(q) == 0]
+        if envs_needing_chunk:
+            # Construct observation batch for the environments needing a chunk
+            sub_batch = {}
+            for k in self._obs_queues[0]:
+                sub_batch[k] = torch.stack([
+                    torch.stack(list(self._obs_queues[idx][k]), dim=0)
+                    for idx in envs_needing_chunk
+                ], dim=0)
+
+            # Generate actions
+            actions = self.diffusion.generate_actions(sub_batch)
             actions = self.unnormalize_outputs({"action": actions})["action"]
 
-            self._queues["action"].extend(actions.transpose(0, 1))
+            # Fill the empty queues
+            for idx_in_sub, env_idx in enumerate(envs_needing_chunk):
+                self._action_queues[env_idx].extend(actions[idx_in_sub].unbind(0))
 
-        return self._queues["action"].popleft()
+        # Pop the next action for every environment and stack them back into a batch tensor
+        actions_to_execute = [self._action_queues[idx].popleft() for idx in range(batch_size)]
+        return torch.stack(actions_to_execute, dim=0)
 
     def forward(self, batch: dict[str, Tensor]) -> tuple[Tensor, None]:
         """Run the batch through the model and compute the loss for training or validation."""
