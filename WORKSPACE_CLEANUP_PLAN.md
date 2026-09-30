@@ -470,6 +470,111 @@ real-robot session has run on the new one, then delete it.
 
 ---
 
+## 7b. Dummy-environment results (measured 2026-09-30)
+
+Built at `/home/qte9489/personal_abhi/temp/resfit-env-test/repo` from a real
+`git clone` of GitHub at `b183a15`, then `clone_deps.sh`, then
+`setup_uv_env.sh`. All of the following is measured, not predicted.
+
+### The good news: the installer reproduces the environment
+
+| step | result |
+| --- | --- |
+| `git clone` from GitHub | 13 MB, 468 files, 1.2 s |
+| `bash scripts/clone_deps.sh` | all 5 deps at their pinned commits, 66 s |
+| `bash scripts/setup_uv_env.sh` | `resfit uv env OK`, torchrl compiled, `cuda=True` |
+| 112 tests | pass, same as the working workspace |
+| agentlace / distributed import | OK |
+
+**Every pinned package matched the working environment exactly** - torch,
+torchvision, torchaudio, torchcodec, tensordict, numpy, gymnasium, mujoco,
+transformers, datasets, and also `av 17.1.0` and `opencv-python 5.0.0.93`, which
+I had expected to drift. torchrl even resolved to the identical git commit
+`0dc98d5`. The constraints and overrides do their job.
+
+### Gap 1 - the real-robot dependencies are not installed at all
+
+`pyrealsense2` (2.56.5.9235) and `trossen-arm` (1.10.0) are in the working
+environment but **nothing installs them** - not `pyproject.toml`, not
+`setup_uv_env.sh`. A teammate following the runbook gets an environment that
+cannot talk to a camera or an arm.
+
+It fails quietly, which is worse than failing loudly: `camera_manager.py` and
+`arm_driver.py` both wrap the import in `try/except ImportError` and set
+`HAS_REALSENSE` / `HAS_TROSSEN_SDK`, so every module still imports and all 112
+tests still pass. The failure only surfaces when hardware is actually used.
+
+**Fix:** add both to `pyproject.toml` under an optional `real` extra (they are
+useless on a training server with no hardware), and have the runbook install it
+for station machines.
+
+### Gap 2 - 47 unpinned transitive packages drifted
+
+None of them broke anything, but they are unpinned by accident rather than by
+decision. The ones worth a look: `numba 0.66.0 -> 0.68.0`,
+`llvmlite 0.48.0 -> 0.50.0`, `pyarrow 24.0.0 -> 25.0.1`,
+`rerun-sdk 0.35.0 -> 0.38.1`, `mink 1.2.0 -> 1.3.0`,
+`accelerate 1.14.0 -> 1.15.0`, and `packaging 26.2 -> 25.0` (a *downgrade*).
+
+**Fix:** once the environment is trusted, freeze it into the lock and let `uv
+sync` enforce it.
+
+### Gap 3 - the working environment has CUDA cruft the fresh one does not
+
+The working `.venv` carries **4 stray `nvidia-*-cu13` packages** alongside the 19
+`cu12` ones; the fresh build has only the 19 `cu12`. Left over from a past torch
+upgrade. Harmless, but it means the working env is *dirtier* than a fresh build -
+a point in favour of switching to a rebuilt one.
+
+### The footgun, proven
+
+I ran `uv sync` in the disposable copy. One command:
+
+| | before | after |
+| --- | --- | --- |
+| torch | 2.11.0+cu128 | **2.13.0+cu130** |
+| torchvision | installed | **uninstalled** |
+| torchrl | 0.9.2 (source build) | **uninstalled** |
+| tensordict | installed | **uninstalled** |
+| robosuite | installed | **uninstalled** |
+| lerobot | installed | **uninstalled** |
+| pytest | installed | **uninstalled** |
+
+This is no longer an argument from documentation. It is what happens.
+
+### The guard, proven
+
+Adding to `pyproject.toml`:
+
+```toml
+[tool.uv]
+managed = false
+```
+
+| command | result |
+| --- | --- |
+| `uv sync` | `error: The project is marked as unmanaged` |
+| `uv run python ...` | uses `.venv/bin/python3`, syncs nothing |
+| `bash scripts/setup_uv_env.sh` | still works - full rebuild from scratch passed |
+
+Rebuilt from scratch with the guard in place and re-ran everything: all pinned
+versions match, C++ extensions bind, 112 tests pass, agentlace imports, `uv sync`
+is refused, and the environment is untouched by the attempt.
+
+### What to do next
+
+1. **Apply the guard to the real workspace now** - two lines, tested, reversible,
+   and it removes the "never type uv" rule that is currently enforced by memory.
+2. **Add `pyrealsense2` + `trossen-arm` as a `real` extra** - Gap 1 is the one
+   that would actually bite a teammate.
+3. Then the bigger job from section 6.3: fold `constraints-uv.txt`,
+   `uv-overrides.txt` and the installer's logic into `pyproject.toml` so
+   `uv sync` becomes the installer rather than something to defend against. The
+   mechanisms are verified; the open question stays build ordering for the
+   torchrl source build.
+
+---
+
 ## 8. Suggested order
 
 | # | step | risk | reversible |
