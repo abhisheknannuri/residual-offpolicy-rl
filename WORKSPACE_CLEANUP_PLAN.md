@@ -575,6 +575,78 @@ is refused, and the environment is untouched by the attempt.
 
 ---
 
+## 7c. The env is now fixed properly - `uv sync` IS the installer
+
+The recommendation in 7b ("keep the .sh script, add a guard") was a half-measure
+and was rejected, correctly. The right question was *why does the shell script
+exist at all*. Answer: it does not have to. It was written pip-style, and every
+one of its four jobs is expressible in `pyproject.toml`. Built and verified in
+the test env on 2026-09-30.
+
+### What replaced what
+
+| the script did | `pyproject.toml` now says |
+| --- | --- |
+| `uv pip install --index-url .../cu128 torch torchvision torchaudio torchcodec` | `[[tool.uv.index]] name="pytorch-cu128" explicit=true` + `[tool.uv.sources]` for those four |
+| `CC=gcc-11 uv pip install --no-build-isolation --no-deps "torchrl @ git+...@v0.9.2"` | `[tool.uv.sources] torchrl = { git=..., rev="v0.9.2" }` + `no-build-isolation-package = ["torchrl"]` |
+| `uv pip install -e deps/robosuite -e deps/mimicgen -e deps/lerobot -e .` | `[tool.uv.sources]` `{ path="deps/...", editable=true }` |
+| `-c constraints-uv.txt --overrides uv-overrides.txt` | `override-dependencies = [gymnasium, datasets, mujoco, numpy]` |
+| `--no-deps` for dexmimicgen's stale `numpy==1.23.3` | the `numpy==2.2.6` override - narrower, keeps its real deps |
+| (nothing - this was simply missing) | `[project.optional-dependencies] real = [pyrealsense2, trossen-arm]` |
+
+### Measured results
+
+| test | result |
+| --- | --- |
+| `uv lock` | 179 packages resolved in 2.2 s |
+| `uv sync` from an empty `.venv` | **2 m 18 s**, torchrl compiled from git |
+| all 13 pinned versions | match the working environment **exactly** |
+| torchvision nms + torchrl C++ extension | bind, `cuda=True` |
+| editable installs | resolve to `deps/*` |
+| 112 tests | pass |
+| agentlace / distributed import | OK |
+| **`uv sync` a second time** | **`Checked 171 packages` in 0.034 s - clean no-op** |
+| `uv sync --extra real` | installs pyrealsense2 2.56.5.9235 + trossen-arm 1.10.0; `HAS_REALSENSE=True`, `HAS_TROSSEN_SDK=True` |
+| `uv run python ...` | uses `.venv/bin/python3` |
+| wipe `.venv`, `uv sync` again | **173 packages, byte-for-byte identical to the first build** |
+
+The build-ordering worry from 6.3 did not materialise: uv installs torch before
+compiling torchrl against it, in a single `uv sync`.
+
+### Consequences
+
+* **`scripts/setup_uv_env.sh` can be deleted.** So can `constraints-uv.txt` and
+  `uv-overrides.txt` - their content now lives in `pyproject.toml`.
+* **`[tool.uv] managed = false` is NOT needed.** It was a guard against `uv sync`
+  being wrong. `uv sync` is now the correct command, so there is nothing to guard
+  against and nothing for anyone to remember.
+* **The 51 unpinned transitive packages are now pinned by `uv.lock`.** They still
+  differ from the current working `.venv` - but that env's versions were
+  accidental, and the lock makes them deterministic from here on.
+* Setup for the whole team becomes:
+
+```sh
+git clone https://github.com/abhisheknannuri/residual-offpolicy-rl.git
+cd residual-offpolicy-rl
+bash scripts/clone_deps.sh      # the 5 vendored repos at pinned commits
+uv sync                         # everything else; add --extra real on a station
+```
+
+### Still to decide before applying to the real workspace
+
+1. `gcc` for the torchrl build is not expressible in `pyproject.toml`. This
+   machine defaults to gcc 11.4, which is what the build wants, so it worked
+   unset. A machine on gcc 14 would need `CC=gcc-11 CXX=g++-11 uv sync`, so that
+   belongs in the README as a prerequisite rather than in a wrapper script.
+2. `ffmpeg` must be on PATH. On this machine it comes from the conda env
+   (`miniforge3/envs/residual/bin/ffmpeg`), which is a hidden dependency on the
+   thing we are trying to stop using. A station needs a system ffmpeg.
+3. The proposed files are saved as `pyproject.proposed.toml` and
+   `uv.lock.proposed` at the repo root for review; applying them means replacing
+   `pyproject.toml`/`uv.lock` and deleting the three superseded files.
+
+---
+
 ## 8. Suggested order
 
 | # | step | risk | reversible |
