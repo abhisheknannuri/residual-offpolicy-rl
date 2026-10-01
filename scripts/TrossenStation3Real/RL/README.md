@@ -4,9 +4,8 @@ Config lives in YAML. The `.sh` files are three-line wrappers that pick a config
 and hand everything else to Hydra.
 
 ```
-conf/station3.yaml        EVERY configurable parameter, in one file, organised
-                          like the dataclasses. HASHED values marked; values that
-                          are a real choice marked `<- not a code default`.
+conf/station3.yaml        every configurable parameter, in one file, organised
+                          like the dataclasses. HASHED values marked.
 conf/modes/*.yaml         what each mode changes - values only, no schema
 conf/execution/*.yaml     role + transport, distributed only
 conf/NN_*.yaml            plain entry: schema + station3 + mode
@@ -25,23 +24,17 @@ check_configs.sh          composes all 8 and asserts the HASHED values match
 
 ## Where the values came from
 
-`station3.yaml` was generated from the dataclass schema, then Station-1's `.sh`
-values applied on top:
+`station3.yaml` lists every parameter the schema defines, so the whole surface is
+visible. Values come from `scripts/TrossenStation1Real/*.sh` where those scripts
+set one, and from the dataclass default otherwise — most of the untouched ones
+(the ViT shape, the reward-model block, critic widths) are defaults nobody has
+tuned, so treat them as inherited rather than chosen.
 
-| | |
-| --- | --- |
-| **177** | parameters in the schema - all present, so the whole surface is visible |
-| **74** | set explicitly by the Station-1 scripts |
-| **37** | of those genuinely differ from the code default - marked `<- not a code default` |
-| **37** | of those happen to equal the code default anyway |
-| **104** | never mentioned in any `.sh`; left at the code default - **inherited, not chosen** |
+Station-3's own decisions are the dataset, station name, W&B project, base ACT
+50k, `algo.learning_starts` 15000 and `real_max_steps` 350.
 
-So a parameter with no marker is one nobody has tuned. Station-3's own decisions
-are the dataset, station name, W&B project, base ACT 50k, `learning_starts`
-15000 and `real_max_steps` 350.
-
-Comments are condensed from `scripts/TrossenStation1Real/train_residual_rl_real.sh`,
-which has the long-form reasoning.
+Inline comments are condensed from `train_residual_rl_real.sh`, which keeps the
+long-form reasoning.
 
 ## The HASHED values are yours to keep stable
 

@@ -1,40 +1,19 @@
 # =============================================================================
-# station3.yaml - every configurable parameter for Station-3 residual RL.
+# station3.yaml - shared configuration for Station-3 residual RL.
 #
-# WHERE THESE VALUES CAME FROM
-# ----------------------------
-# The file was generated from the real dataclass schema
-# (resfit/rl_finetuning/config/), so all 177 parameters are present and you can
-# see the whole surface in one place. Then Station-1's .sh values were applied
-# on top:
+# Holds values only (no `defaults:`), so both the plain and the distributed mode
+# files can include it. Organised like the dataclasses in
+# resfit/rl_finetuning/config/, and lists every parameter the schema defines so
+# the whole surface is visible in one place.
 #
-#   177  parameters in the schema
-#    74  were set explicitly by scripts/TrossenStation1Real/*.sh
-#         - of those, 37 DIFFER from the code default: real choices, marked
-#           `<- not a code default`
-#         - the other 37 happen to equal the code default anyway
-#   104  were never mentioned in any .sh and are left at the code default -
-#        inherited, not chosen. Treat them as "nobody has tuned this yet".
-#
-# Station-3-specific values (dataset, station name, W&B project) replace
-# Station-1's, and base ACT 50k / learning_starts 15000 / real_max_steps 350 are
-# this station's own decisions.
-#
-# Comments are condensed from the Station-1 scripts - the originals in
-# scripts/TrossenStation1Real/train_residual_rl_real.sh have the long form.
-#
-# THIS FILE HOLDS VALUES ONLY - no `defaults:` - so both the plain and the
-# distributed mode files can pull it in. They register different structured
-# configs (residual_td3_trossen_real_config vs ..._dist_config).
-#
-# ### HASHED ###
-# Lines marked `# HASHED (...)` feed a replay-buffer cache key. CHANGE ONE AND
-# EVERY SCRIPT GETS A DIFFERENT, EMPTY BUFFER - you re-collect at the robot and
-# rebuild the offline buffer. Keeping them stable is YOUR responsibility.
-# `./check_configs.sh` will tell you if the modes have drifted apart.
-# See docs/real/BUFFER_CACHES.md for which value lands in which hash.
+# Parameters marked `# HASHED` feed a replay-buffer cache key. Changing one
+# gives every script a different, empty buffer: the offline buffer is rebuilt
+# and the online warm-up must be re-collected at the robot. Keeping them stable
+# is a matter of discipline, not enforcement - `./check_configs.sh` reports
+# whether the modes still agree. docs/real/BUFFER_CACHES.md says which value
+# lands in which hash.
 # =============================================================================
-seed: 42    # <- not a code default
+seed: 42
 torch_deterministic: false
 debug: false
 # selects the env family. Part of BOTH cache hashes.
@@ -43,7 +22,7 @@ num_envs: 1
 eval_num_envs: 1
 # 0 = no automated eval on real hardware (an eval would need
 # the robot to run unattended episodes).
-eval_num_episodes: 0    # <- not a code default
+eval_num_episodes: 0
 eval_horizon: null
 headless: true
 # false = reward is float(next.done), i.e. the sparse pedal signal.
@@ -52,24 +31,24 @@ reward_shaping: false    # HASHED (offline)
 video_key: observation.images.agentview
 # the two wrist cameras the policy actually consumes. Must match what
 # policy_server.py reports, and it is hashed as 'image_keys'.
-rl_camera:    # HASHED (both, as 'image_keys')  <- not a code default
+rl_camera:    # HASHED (both, as 'image_keys')
 - observation.images.cam_left_wrist
 - observation.images.cam_right_wrist
 algo:
   # online env steps. At 20Hz, 75000 ~ 62 min of pure motion,
   # more in practice with resets and interventions.
-  total_timesteps: 75000    # <- not a code default
-  batch_size: 256    # HASHED (both (via offline/online batch size))
+  total_timesteps: 75000
+  batch_size: 256    # HASHED (both, via the offline/online batch split)
   # circular. Past this, the OLDEST transitions are evicted - which
   # are your warm-up data. See docs/real/BUFFER_CACHES.md.
-  buffer_size: 70000    # HASHED (online)  <- not a code default
+  buffer_size: 70000    # HASHED (online)
   # random/base-policy warm-up filling the ONLINE buffer via live
   # env.step() BEFORE any gradient update. At 20Hz, 15000 ~ 12 min
   # (~30 episodes of 350 steps).
-  learning_starts: 15000    # HASHED (online (as 'size'))  <- not a code default
+  learning_starts: 15000    # HASHED (online, as 'size')
   # 0.9975 over a 350-step horizon; a 0.99 discount would make the
   # end of an episode nearly invisible to the critic.
-  gamma: 0.9975    # HASHED (both)  <- not a code default
+  gamma: 0.9975    # HASHED (both)
   # UTD - gradient updates per env step. 4 is what the sim runs used.
   num_updates_per_iteration: 4
   actor_updates_per_iteration: 1
@@ -77,38 +56,38 @@ algo:
   # half of every batch comes from the offline buffer, half from the
   # online one. With batch_size it decides BOTH batch sizes, so it
   # lands in both hashes.
-  offline_fraction: 0.5    # HASHED (both (via offline/online batch size))
+  offline_fraction: 0.5    # HASHED (both, via the offline/online batch split)
   # n-step returns, applied as a WRITE-TIME (inverse) transform, so
   # the stored rows are already collapsed. Do not re-add dumped rows.
   n_step: 3    # HASHED (both)
   terminated_only_bootstrap: false
   # critic-only updates before the actor is touched. Overridden per
   # mode - see conf/modes/.
-  critic_warmup_steps: 0    # <- not a code default
+  critic_warmup_steps: 0
   actor_lr_warmup_steps: 0
   # exploration noise during warm-up, per joint. Mirrors action_scale
   # so warm-up stays inside the residual range the actor can produce.
-  random_action_noise_scale: [0.15, 0.15, 0.15, 0.05, 0.05, 0.05, 0.1]    # HASHED (online)  <- not a code default
+  random_action_noise_scale: [0.15, 0.15, 0.15, 0.05, 0.05, 0.05, 0.1]    # HASHED (online)
   sampling_strategy: uniform    # HASHED (both)
-  prefetch_batches: 3    # <- not a code default
+  prefetch_batches: 3
   priority_alpha: 0.6
   priority_beta: 0.4
-  stddev_max: 0.3    # <- not a code default
-  stddev_min: 0.1    # <- not a code default
-  stddev_step: 100000    # <- not a code default
+  stddev_max: 0.3
+  stddev_min: 0.1
+  stddev_step: 100000
   stddev_schedule: linear(0.05,0.05,300000)
   critic_warmup_save_freq: 5000
   # checkpoint the online buffer every N transitions during warm-up.
   # This is what makes a dropped robot connection resumable - without
   # it the buffer is only written once, at the very end.
-  online_warmup_save_freq: 1000    # <- not a code default
+  online_warmup_save_freq: 1000
   # MUST stay true on real hardware; the trainer asserts it. The
   # 'pure random minus base' warm-up can imply arbitrarily large
   # corrections, which is unsafe on a real arm.
   use_base_policy_for_warmup: true
   progressive_clipping_steps: 0
   train_offline_rl: false
-  offline_rl_steps: 0    # <- not a code default
+  offline_rl_steps: 0
   offline_rl_bc_alpha: 0.2
   offline_eval_interval_every_steps: 5000
   offline_save_freq: 5000
@@ -120,8 +99,8 @@ agent:
   device: cuda
   # 1e-6 for both actor and critic - deliberately small. The residual
   # rides on a frozen BC policy; large steps destabilise it.
-  actor_lr: 1e-06    # <- not a code default
-  critic_lr: 1e-06    # <- not a code default
+  actor_lr: 1e-06
+  critic_lr: 1e-06
   critic_target_tau: 0.005
   stddev_clip: 0.3
   lr_warmup_steps: 0
@@ -146,14 +125,14 @@ agent:
     spatial_emb: 1024
     # 2 Q heads with min over both (policy_gradient_type: min) - plain
     # TD3 twin critics, not the 10-head ensemble the default assumes.
-    num_q: 2    # <- not a code default
+    num_q: 2
     loss:
       type: mse
       n_bins: 51
       v_min: 0.0
       v_max: 1.0
       sigma: -1.0
-    policy_gradient_type: min    # <- not a code default
+    policy_gradient_type: min
     num_layers: 2
     use_layer_norm: true
     min_q_heads: 2
@@ -166,17 +145,17 @@ agent:
     spatial_emb: 0
     # small init so the residual starts near zero, i.e. the base policy
     # is left alone until the critic has something to say.
-    actor_last_layer_init_scale: 0.01    # <- not a code default
+    actor_last_layer_init_scale: 0.01
     actor_last_layer_init_distribution: normal
     actor_intermediate_layer_init_distribution: default
     action_l2_reg_weight: 0.0
     # per-joint residual limit (6 joint deltas + gripper). START SMALL on
     # real hardware and raise only after watching it move.
-    action_scale: [0.15, 0.15, 0.15, 0.05, 0.05, 0.05, 0.1]    # <- not a code default
+    action_scale: [0.15, 0.15, 0.15, 0.05, 0.05, 0.05, 0.1]
     num_layers: 2
     use_layer_norm: true
-  critic_grad_clip_norm: 10.0    # <- not a code default
-  actor_grad_clip_norm: 10.0    # <- not a code default
+  critic_grad_clip_norm: 10.0
+  actor_grad_clip_norm: 10.0
   # 0 = no BC regularisation on the residual actor.
   bc_loss_coef: 0.0
   bc_loss_dynamic: 0
@@ -188,8 +167,8 @@ agent:
 offline_data:
   # MUST be the '_old' v2.1 copy: the vendored lerobot is
   # CODEBASE_VERSION 'v2.1' and cannot read the v3.0 sibling.
-  name: PickCubeAndInsert_Station3_Trial1_deltajoint_old    # HASHED (offline)  <- not a code default
-  num_episodes: 178    # HASHED (offline)  <- not a code default
+  name: PickCubeAndInsert_Station3_Trial1_deltajoint_old    # HASHED (offline)
+  num_episodes: 178    # HASHED (offline)
   # true = each offline transition's base action is fetched from
   # policy_server.py. This is why building the offline buffer needs
   # the policy server (and, incidentally, the robot).
@@ -197,7 +176,7 @@ offline_data:
   min_action_range: 0.1    # HASHED (both)
   min_state_std: 0.1    # HASHED (both)
   # frames are resized to 84x84 AFTER the policy query, before storing.
-  image_size: 84    # <- not a code default
+  image_size: 84
   reward_parquet: null
   reward_column: reward_pbrs
   # HASHED, and deliberately NOT ${hydra:runtime.cwd}/... - that resolves to the
@@ -205,10 +184,10 @@ offline_data:
   # change the offline cache hash and rebuild the buffer (verified: launching from
   # /tmp gave root: /tmp/trossen_real/...). RESFIT_ROOT lets another machine point
   # elsewhere without editing this file.
-  root: "${oc.env:RESFIT_ROOT,/home/qte9489/personal_abhi/temp/residual-offpolicy-rl}/trossen_real/datasets/PickCubeAndInsert_Station3_Trial1_deltajoint_old"    # HASHED (offline)  <- not a code default
+  root: "${oc.env:RESFIT_ROOT,/home/qte9489/personal_abhi/temp/residual-offpolicy-rl}/trossen_real/datasets/PickCubeAndInsert_Station3_Trial1_deltajoint_old"    # HASHED (offline)
   remap_preset: null
 wandb:
-  project: trossen-station3-pick-and-insert-residual-td3    # <- not a code default
+  project: trossen-station3-pick-and-insert-residual-td3
   mode: online
   entity: null
   notes: null
@@ -216,23 +195,23 @@ wandb:
   name: null    # HASHED (both)
   group: null
 log_freq: 100
-eval_interval_every_steps: 1000000    # <- not a code default
+eval_interval_every_steps: 1000000
 checkpoint_interval: -1
-save_video: false    # <- not a code default
-eval_first: false    # <- not a code default
+save_video: false
+eval_first: false
 actor_name: null
 real_hardware: true
-station_config_name: trossen_station3_single    # <- not a code default
+station_config_name: trossen_station3_single
 policy_server_url: "http://127.0.0.1:5070"
 real_action_space: delta_joint
 # episode horizon. Also the training env's max_steps, and hashed as
 # 'horizon'.
-real_max_steps: 350    # HASHED (online (as 'horizon'))  <- not a code default
+real_max_steps: 350    # HASHED (online, as 'horizon')
 # pause after a reset before the next episode starts.
-real_settle_time_s: 0.5    # <- not a code default
+real_settle_time_s: 0.5
 # true = leader arm + foot pedal can take over mid-episode; those
 # transitions are stored with intervened=True.
-enable_intervention: true    # <- not a code default
+enable_intervention: true
 real_log_file: null
 use_reward_manipulation_wrapper: false
 terminate_on_success: false
@@ -273,10 +252,10 @@ reward_model:
   monotonic: true
   offline_key: null
 # checkpoint every N steps.
-save_freq: 5000    # <- not a code default
+save_freq: 5000
 # MUST stay true. With false the trainer rmtree's the run directory
 # on success - deleting the checkpoints AND online_buffer_final.
-no_cleanup: true    # <- not a code default
+no_cleanup: true
 save_training_rollouts: false
 training_rollout_prob: 0.2
 resume_ckpt: null
