@@ -85,6 +85,51 @@ They reuse `conf/station3.yaml` and `conf/modes/*.yaml` unchanged - only the
 schema and the `execution` overlay differ - so the plain and distributed paths
 cannot drift. Verified by `check_configs.sh`.
 
+## How a config is assembled
+
+`--config-dir conf` puts that directory on Hydra's search path;
+`--config-name 01_populate` makes `conf/01_populate.yaml` the primary config.
+Its `defaults:` list is the recipe, applied **top to bottom, later wins**:
+
+```yaml
+defaults:
+  - residual_td3_trossen_real_config   # 1. the SCHEMA - a dataclass, not a file
+  - station3                           # 2. conf/station3.yaml
+  - modes/01_populate                  # 3. conf/modes/01_populate.yaml
+  - _self_                             # 4. this file's own keys, last so they win
+```
+
+```
+dataclass defaults (177 params)
+  <- station3.yaml            the shared values
+  <- modes/01_populate.yaml   what this mode changes
+  <- command-line overrides   win over everything
+```
+
+Order is load-bearing: `station3.yaml` sets `algo.total_timesteps: 75000` and
+`modes/01_populate.yaml` sets `0`; the composed config is `0`, because the mode
+comes later.
+
+Three things that are not obvious:
+
+* **`residual_td3_trossen_real_config` is not a file.** It is the dataclass
+  registered by `cs.store(name=...)` in `resfit/rl_finetuning/config/residual_td3.py`.
+  That is where the 177 parameters and their types come from, and why a
+  misspelled key is rejected at compose time rather than at runtime.
+* **A subdirectory is a config GROUP.** `modes/01_populate` means "group `modes`,
+  option `01_populate`". Nothing registers the folder - Hydra finds it because it
+  is under the search path, and the directory name is the group name. Groups can
+  be swapped from the command line, which is how `execution=single` works.
+* **`# @package _global_` is required in every group file.** Without it a group's
+  contents nest under the group name, and you get
+  `Key 'modes' not in 'ResidualTD3TrossenRealConfig'`. It says "merge these keys
+  at the root instead".
+
+Only the `dist_*` configs list `execution: distributed`; the plain ones have no
+`execution` entry, which is why `execution=` cannot be overridden on them.
+`conf/execution/single.yaml` is not used by any config by default - it exists so
+`execution=single` works as a swap on a distributed config.
+
 ## Overriding
 
 Each `.sh` picks one config and passes everything after it straight to Hydra.
@@ -127,6 +172,22 @@ its transport block). Both verified.
 with `Could not override 'execution'. No match in the defaults list.` - correct,
 because `role`/`dist` exist only in the distributed schema
 (`ResidualTD3TrossenRealDistConfig`), and the plain entrypoint would reject them.
+
+## Where the buffers live: single vs distributed are NOT interchangeable
+
+In **single** mode one process owns both replay buffers, so the caches are
+written on **that machine**.
+
+In **distributed** mode they are the learner's. The actor never holds a replay
+buffer at all - its `online_rb` is an `_NStepSink` that assembles n-step
+transitions and pushes them over the wire
+(`train_residual_td3_distributed.py:2428`), while every
+`online_buffer_cache/<hash>/` read and write happens inside `_learner_body`.
+
+So the offline and online caches land on **whichever machine runs the learner**.
+Populating on the laptop with `./01_populate_buffers.sh` does not give the GPU
+server a buffer, and vice versa - the hash is the same, the disk is not. Decide
+where you want the data to live before spending robot time on it.
 
 ## Settings
 
