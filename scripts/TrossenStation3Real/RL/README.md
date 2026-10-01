@@ -26,9 +26,14 @@ check_configs.sh          composes all 8 and asserts the HASHED values match
 
 `station3.yaml` lists every parameter the schema defines, so the whole surface is
 visible. Values come from `scripts/TrossenStation1Real/*.sh` where those scripts
-set one, and from the dataclass default otherwise — most of the untouched ones
-(the ViT shape, the reward-model block, critic widths) are defaults nobody has
-tuned, so treat them as inherited rather than chosen.
+set one — all five agree on every value, so there is a single Station-1 answer —
+and from the dataclass default otherwise. Most of the untouched ones (the ViT
+shape, the reward-model block, critic widths) are defaults nobody has tuned, so
+treat them as inherited rather than chosen.
+
+`check_station1_parity.py` re-derives the Station-1 values straight from the
+shell scripts and diffs them against this file, so a value cannot quietly drift
+or be mistyped.
 
 Station-3's own decisions are the dataset, station name, W&B project, base ACT
 50k, `algo.learning_starts` 15000 and `real_max_steps` 350.

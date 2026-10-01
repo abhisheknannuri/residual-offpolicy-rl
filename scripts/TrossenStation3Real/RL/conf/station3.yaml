@@ -22,7 +22,7 @@ num_envs: 1
 eval_num_envs: 1
 # 0 = no automated eval on real hardware (an eval would need
 # the robot to run unattended episodes).
-eval_num_episodes: 0
+eval_num_episodes: 1
 eval_horizon: null
 headless: true
 # false = reward is float(next.done), i.e. the sparse pedal signal.
@@ -63,24 +63,24 @@ algo:
   terminated_only_bootstrap: false
   # critic-only updates before the actor is touched. Overridden per
   # mode - see conf/modes/.
-  critic_warmup_steps: 0
+  critic_warmup_steps: 15000
   actor_lr_warmup_steps: 0
   # exploration noise during warm-up, per joint. Mirrors action_scale
   # so warm-up stays inside the residual range the actor can produce.
   random_action_noise_scale: [0.15, 0.15, 0.15, 0.05, 0.05, 0.05, 0.1]    # HASHED (online)
   sampling_strategy: uniform    # HASHED (both)
-  prefetch_batches: 3
+  prefetch_batches: 4
   priority_alpha: 0.6
   priority_beta: 0.4
-  stddev_max: 0.3
-  stddev_min: 0.1
-  stddev_step: 100000
+  stddev_max: [0.015, 0.015, 0.015, 0.03, 0.03, 0.03, 0.0125]
+  stddev_min: [0.015, 0.015, 0.015, 0.03, 0.03, 0.03, 0.0125]
+  stddev_step: 15000
   stddev_schedule: linear(0.05,0.05,300000)
   critic_warmup_save_freq: 5000
   # checkpoint the online buffer every N transitions during warm-up.
   # This is what makes a dropped robot connection resumable - without
   # it the buffer is only written once, at the very end.
-  online_warmup_save_freq: 1000
+  online_warmup_save_freq: 2000
   # MUST stay true on real hardware; the trainer asserts it. The
   # 'pure random minus base' warm-up can imply arbitrarily large
   # corrections, which is unsafe on a real arm.
@@ -100,7 +100,7 @@ agent:
   # 1e-6 for both actor and critic - deliberately small. The residual
   # rides on a frozen BC policy; large steps destabilise it.
   actor_lr: 1e-06
-  critic_lr: 1e-06
+  critic_lr: 1e-4
   critic_target_tau: 0.005
   stddev_clip: 0.3
   lr_warmup_steps: 0
@@ -125,14 +125,14 @@ agent:
     spatial_emb: 1024
     # 2 Q heads with min over both (policy_gradient_type: min) - plain
     # TD3 twin critics, not the 10-head ensemble the default assumes.
-    num_q: 2
+    num_q: 10
     loss:
       type: mse
       n_bins: 51
       v_min: 0.0
       v_max: 1.0
       sigma: -1.0
-    policy_gradient_type: min
+    policy_gradient_type: ensemble_mean
     num_layers: 2
     use_layer_norm: true
     min_q_heads: 2
@@ -145,7 +145,7 @@ agent:
     spatial_emb: 0
     # small init so the residual starts near zero, i.e. the base policy
     # is left alone until the critic has something to say.
-    actor_last_layer_init_scale: 0.01
+    actor_last_layer_init_scale: 0.0
     actor_last_layer_init_distribution: normal
     actor_intermediate_layer_init_distribution: default
     action_l2_reg_weight: 0.0
@@ -154,8 +154,8 @@ agent:
     action_scale: [0.15, 0.15, 0.15, 0.05, 0.05, 0.05, 0.1]
     num_layers: 2
     use_layer_norm: true
-  critic_grad_clip_norm: 10.0
-  actor_grad_clip_norm: 10.0
+  critic_grad_clip_norm: 1.0
+  actor_grad_clip_norm: 1.0
   # 0 = no BC regularisation on the residual actor.
   bc_loss_coef: 0.0
   bc_loss_dynamic: 0
@@ -195,7 +195,7 @@ wandb:
   name: null    # HASHED (both)
   group: null
 log_freq: 100
-eval_interval_every_steps: 1000000
+eval_interval_every_steps: 999999999
 checkpoint_interval: -1
 save_video: false
 eval_first: false
@@ -208,7 +208,7 @@ real_action_space: delta_joint
 # 'horizon'.
 real_max_steps: 350    # HASHED (online, as 'horizon')
 # pause after a reset before the next episode starts.
-real_settle_time_s: 0.5
+real_settle_time_s: 2.0
 # true = leader arm + foot pedal can take over mid-episode; those
 # transitions are stored with intervened=True.
 enable_intervention: true
@@ -252,7 +252,7 @@ reward_model:
   monotonic: true
   offline_key: null
 # checkpoint every N steps.
-save_freq: 5000
+save_freq: 2500
 # MUST stay true. With false the trainer rmtree's the run directory
 # on success - deleting the checkpoints AND online_buffer_final.
 no_cleanup: true
