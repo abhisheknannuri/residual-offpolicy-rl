@@ -179,12 +179,10 @@ offline_data:
   image_size: 84
   reward_parquet: null
   reward_column: reward_pbrs
-  # HASHED, and deliberately NOT ${hydra:runtime.cwd}/... - that resolves to the
-  # LAUNCH directory, so running from anywhere but the repo root would silently
-  # change the offline cache hash and rebuild the buffer (verified: launching from
-  # /tmp gave root: /tmp/trossen_real/...). RESFIT_ROOT lets another machine point
-  # elsewhere without editing this file.
-  root: "${oc.env:RESFIT_ROOT,/home/qte9489/personal_abhi/temp/residual-offpolicy-rl}/trossen_real/datasets/PickCubeAndInsert_Station3_Trial1_deltajoint_old"    # HASHED (offline)
+  # Absolute path to the dataset directory. Edit it when the repo or the
+  # dataset lives somewhere else (e.g. on the server), or override per run:
+  #     ./01_populate_buffers.sh offline_data.root=/abs/path/to/dataset
+  root: /home/qte9489/personal_abhi/temp/residual-offpolicy-rl/trossen_real/datasets/PickCubeAndInsert_Station3_Trial1_deltajoint_old    # HASHED (offline)
   remap_preset: null
 wandb:
   project: trossen-station3-pick-and-insert-residual-td3
