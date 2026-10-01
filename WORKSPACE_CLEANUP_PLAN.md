@@ -51,7 +51,14 @@ Tick as they are closed; add to it rather than starting a new list elsewhere.
 
 ### Real-robot / RL
 - [ ] `scripts/TrossenStation3Real/RL/` - residual-RL run scripts for Station 3
-      (in progress).
+      (blocked on four decisions: base ACT checkpoint, `LEARNING_STARTS`,
+      `REAL_MAX_STEPS`, `OFFLINE_EPISODES`).
+- [x] Document the buffer caches and what invalidates them -
+      `docs/real/BUFFER_CACHES.md`.
+- [x] `scripts/promote_online_buffer.py` - carry an online-RL session's buffer
+      into the hashed cache so the next run resumes from it.
+- [ ] Station-1's scripts disagree on `algo.learning_starts` (15000 vs 10000),
+      so they do not share an online buffer. Decide whether to align them.
 - [ ] Eval campaign: 7 checkpoints x 20 poses done; the success differences are
       within noise at n=20. Rerun the top few with more trials before concluding.
 - [ ] Pose 07 (11.8, 7.5) is dead centre and 0/7 across every checkpoint - watch
