@@ -458,7 +458,7 @@ def main(cfg: ResidualTD3DexmgConfig):
             from trossen_real.cameras.camera_manager import CameraManager
             from trossen_real.config import load_station_config
             from trossen_real.human_intervention.pedal_listener import PedalListener
-            from trossen_real.inference.policy_client import PolicyClient
+            from trossen_real.inference.policy_client import ChunkedPolicyClient, PolicyClient
             from trossen_real.leader.trossen_leader_single import TrossenSingleLeader
             from trossen_real.rl.real_residual_env import TrossenResidualEnv
             from trossen_real.teleop.follower_client import FollowerClient
@@ -481,6 +481,44 @@ def main(cfg: ResidualTD3DexmgConfig):
             if not policy_health.get("loaded"):
                 follower.disconnect()
                 raise RuntimeError(f"policy_server.py at {cfg.policy_server_url} has no policy loaded - {policy_health}")
+
+            # --------------------------------------------------------------
+            # Chunked fetching: one round trip per N queries instead of per query.
+            #
+            # This changes the NETWORK pattern, not the actions. /predict already
+            # serves from ACTPolicy.select_action()'s internal queue and only runs
+            # the model when that queue is empty, so a client-side queue returns
+            # the identical sequence while paying 1 round trip instead of N.
+            #
+            # Wrapping HERE gives it to both consumers of env.policy:
+            #   * the offline build, which is 55,177 queries (one per dataset
+            #     frame) - by far the biggest beneficiary;
+            #   * the online rollout.
+            # Both already reset the policy at the right moments, and the wrapper
+            # drops its queue on reset(): _populate_offline_buffer() at every
+            # episode boundary, TrossenResidualEnv.reset() per episode, and
+            # InterventionManager on the intervention release edge - which works
+            # because the env hands that manager this SAME object
+            # (real_residual_env.py:147).
+            # --------------------------------------------------------------
+            if cfg.policy_chunk_steps:
+                if not policy_health.get("supports_predict_chunk"):
+                    follower.disconnect()
+                    raise RuntimeError(
+                        f"policy_chunk_steps={cfg.policy_chunk_steps} but policy_server.py at "
+                        f"{cfg.policy_server_url} does not support /predict_chunk. Either it predates "
+                        "that endpoint, or the checkpoint is one where chunking would change the "
+                        "actions (temporal ensembling, or use_relative_actions=True) and the server "
+                        "refuses it. Set policy_chunk_steps=0 to use per-query /predict."
+                    )
+                n_steps = None if cfg.policy_chunk_steps < 0 else int(cfg.policy_chunk_steps)
+                policy_client = ChunkedPolicyClient(policy_client, n_steps)
+                print(colored(
+                    f"Policy fetching: CHUNKED ({'server n_action_steps' if n_steps is None else n_steps}"
+                    f" actions per round trip; server reports n_action_steps="
+                    f"{policy_health.get('n_action_steps')})", "cyan"))
+            else:
+                print("Policy fetching: per-query /predict (policy_chunk_steps=0)")
 
             cameras = CameraManager(station_config)
             cameras.start()
