@@ -102,6 +102,8 @@ class TrossenResidualEnv:
         settle_time_s: float = 2.0,
         rl_image_size: int | None = None,
         log_file: str | None = None,
+        policy_image_encoding: str = "raw",
+        policy_jpeg_quality: int = 95,
     ) -> None:
         self.follower = follower
         self.cameras = cameras
@@ -117,6 +119,11 @@ class TrossenResidualEnv:
         self.max_steps = max_steps
         self.settle_time_s = settle_time_s
         self.rl_image_size = rl_image_size
+        # How frames are packed for policy_server.py. Only affects the wire
+        # format of the base-policy query - the images STORED in the replay
+        # buffer are the rl_image_size resizes and are untouched by this.
+        self.policy_image_encoding = policy_image_encoding
+        self.policy_jpeg_quality = policy_jpeg_quality
         # All of THIS env's own tensors (state, images, base-policy action, stored action)
         # are built on the SAME device as action_scaler/state_standardizer - matching
         # train_residual_td3.py's `device` (e.g. cuda) so they can be combined directly
@@ -476,7 +483,8 @@ class TrossenResidualEnv:
         return obs
 
     def _query_base_action(self, follower_state: dict, images: dict[str, np.ndarray]) -> torch.Tensor:
-        json_obs = build_observation(follower_state, images, self.image_keys)
+        json_obs = build_observation(follower_state, images, self.image_keys,
+                                     self.policy_image_encoding, self.policy_jpeg_quality)
         base_action_np = self.policy.predict(json_obs)  # (7,) real units
         base_action = torch.from_numpy(np.asarray(base_action_np, dtype=np.float32)).unsqueeze(0).to(self.device)  # (1,7)
         return self.action_scaler.scale(base_action)

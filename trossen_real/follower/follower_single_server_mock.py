@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 
 # Matches arm_driver.MockArm's free-floating default: [x, y, z, ax, ay, az].
 _MOCK_POSE = np.array([0.3, 0.0, 0.3, 0.0, 1.57, 0.0], dtype=np.float32)
-_MOCK_GRIPPER_OPEN = 0.044
+_MOCK_GRIPPER_OPEN = 0.040
 
 
 class MockFollowerSingle:

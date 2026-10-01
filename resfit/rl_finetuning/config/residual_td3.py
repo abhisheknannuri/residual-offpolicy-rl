@@ -281,6 +281,39 @@ class ResidualTD3DexmgConfig(RLPDDexmgConfig):
     real_log_file: str | None = None
 
     # ------------------------------------------------------------------
+    # How we talk to policy_server.py ----------------------------------
+    # ------------------------------------------------------------------
+    # These apply EVERYWHERE the base policy is queried - offline buffer
+    # population, the online warm-up, and online RL - because they describe the
+    # wire format, not a training choice. Both paths go through
+    # `trossen_real/inference/policy_client.py`.
+
+    # How camera / dataset frames are packed for the request body:
+    #   "raw"  - uncompressed HWC bytes + base64. The original behaviour.
+    #   "zlib" - the same bytes deflated. Lossless, ~3.3x smaller.
+    #   "jpeg" - ~15x smaller at quality 95. Lossy, but measured on real
+    #            wrist-cam frames it distorts LESS than the AV1 the LeRobot
+    #            dataset is itself stored in (mean abs err 0.79 vs 1.39 on
+    #            0-255), so it does not move inference further from the
+    #            training distribution than training already was.
+    # NOT part of either replay-buffer cache key: changing it will not
+    # invalidate an existing buffer, even though the base actions it produces
+    # differ slightly. Keep it fixed for a given buffer.
+    policy_image_encoding: str = "raw"
+    policy_jpeg_quality: int = 95
+
+    # Fetch a whole action chunk per request instead of one action per request.
+    #   0  - one POST /predict per query (the original behaviour)
+    #   -1 - POST /predict_chunk, chunk length = the server's own n_action_steps
+    #   N  - POST /predict_chunk, asking for N steps (server caps at chunk_size)
+    # This changes the NETWORK pattern, not the actions: policy_server.py's
+    # /predict already serves from an internal queue and only runs the model when
+    # that queue is empty, so a client-side queue returns the identical sequence
+    # (see ChunkedPolicyClient). The queue is dropped on every policy.reset(),
+    # which happens at every episode boundary and on intervention release.
+    policy_chunk_steps: int = 0
+
+    # ------------------------------------------------------------------
     # Environment reward manipulation ----------------------------------
     # ------------------------------------------------------------------
     use_reward_manipulation_wrapper: bool = False

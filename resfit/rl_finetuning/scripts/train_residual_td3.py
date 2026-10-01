@@ -525,6 +525,8 @@ def main(cfg: ResidualTD3DexmgConfig):
                 # (_query_base_action()) is unaffected - always sends the full-res frame.
                 rl_image_size=cfg.offline_data.image_size,
                 log_file=cfg.real_log_file,
+                policy_image_encoding=cfg.policy_image_encoding,
+                policy_jpeg_quality=cfg.policy_jpeg_quality,
             )
 
         # Build the stage-aware reward-model config (training env only). Passed as a
@@ -607,6 +609,19 @@ def main(cfg: ResidualTD3DexmgConfig):
     # ---------------------------------------------------------------------
     assert cfg.num_envs == 1, "Only support 1 environment for now because of how n_step is implemented"
     if cfg.real_hardware:
+        # Checked here rather than on the first frame: an invalid value would
+        # otherwise surface only after the robot is connected and the dataset
+        # loaded. Imported locally, like every other trossen_real import in this
+        # file, so a sim-only run never needs the package.
+        from trossen_real.inference.policy_client import IMAGE_ENCODINGS
+
+        assert cfg.policy_image_encoding in IMAGE_ENCODINGS, (
+            f"policy_image_encoding must be one of {list(IMAGE_ENCODINGS)}, "
+            f"got {cfg.policy_image_encoding!r}"
+        )
+        assert 1 <= cfg.policy_jpeg_quality <= 100, (
+            f"policy_jpeg_quality must be in [1, 100], got {cfg.policy_jpeg_quality}"
+        )
         assert cfg.eval_num_envs == 1, "Real hardware only supports a single station (eval_num_envs must be 1)"
         assert cfg.algo.use_base_policy_for_warmup, (
             "real_hardware=True requires algo.use_base_policy_for_warmup=true - the 'pure random minus "
@@ -938,7 +953,9 @@ def main(cfg: ResidualTD3DexmgConfig):
     # ------------------------------------------------------------------
     # Convert offline dataset episodes into transitions and fill buffer
     # ------------------------------------------------------------------
-    def _dataset_sample_to_json_obs(sample: dict, image_keys: list[str]) -> dict:
+    def _dataset_sample_to_json_obs(sample: dict, image_keys: list[str],
+                                    image_encoding: str = "raw",
+                                    jpeg_quality: int = 95) -> dict:
         """Build the JSON body `policy_server.py`'s `/predict` expects, directly
         from a LeRobotDataset sample's NATIVE-resolution image tensors - used by
         `_populate_offline_buffer()`'s real-hardware branch (no live
@@ -962,7 +979,7 @@ def main(cfg: ResidualTD3DexmgConfig):
         for key in image_keys:
             chw = sample[key].float().squeeze(0)  # (3, H, W), native resolution, [0, 1]
             hwc_uint8 = (chw.clamp(0, 1) * 255.0).round().byte().permute(1, 2, 0).numpy()
-            obs[key] = encode_image(hwc_uint8)
+            obs[key] = encode_image(hwc_uint8, image_encoding, jpeg_quality)
         return obs
 
     def _populate_offline_buffer(
@@ -977,6 +994,8 @@ def main(cfg: ResidualTD3DexmgConfig):
         real_hardware: bool = False,
         real_policy_client=None,
         post_resize=None,
+        policy_image_encoding: str = "raw",
+        policy_jpeg_quality: int = 95,
     ) -> int:
         """
         Iterates through *dataset* sequentially, converts consecutive frames
@@ -1041,7 +1060,8 @@ def main(cfg: ResidualTD3DexmgConfig):
                     # touches a local in-process ACTPolicy (none is loaded for real
                     # hardware; the checkpoint's lerobot version may not even match
                     # this repo's vendored resfit.lerobot ACT implementation).
-                    json_obs = _dataset_sample_to_json_obs(sample, image_keys)
+                    json_obs = _dataset_sample_to_json_obs(
+                        sample, image_keys, policy_image_encoding, policy_jpeg_quality)
                     base_action_np = real_policy_client.predict(json_obs)  # (7,) real units
                     base_action = torch.from_numpy(np.asarray(base_action_np, dtype=np.float32)).unsqueeze(0)
                     base_action_scaled = action_scaler.scale(base_action.squeeze(0).cpu())
@@ -1328,6 +1348,8 @@ def main(cfg: ResidualTD3DexmgConfig):
                 real_hardware=cfg.real_hardware,
                 real_policy_client=env.policy if _query_base_actions_from_remote_policy else None,
                 post_resize=offline_image_transforms if _query_base_actions_from_remote_policy else None,
+                policy_image_encoding=cfg.policy_image_encoding,
+                policy_jpeg_quality=cfg.policy_jpeg_quality,
             )
 
             print(f"Added {added} offline transitions to buffer (size={len(offline_rb)})")
