@@ -167,6 +167,32 @@ warns when `algo.buffer_size` differs between the two, preserves the
 destination's `user_metadata.json` (the record of which config the hash belongs
 to), and keeps the previous cache as `<dest>.bak-<timestamp>`.
 
+### The buffer is circular - what that costs you
+
+The storage is `LazyTensorStorage(max_size=algo.buffer_size)` (`:817`), which is
+**circular**. Once it holds `algo.buffer_size` transitions - 70,000 in the
+Station-1 configs - every new transition **overwrites the oldest**.
+
+The warm-up / population data goes in first, so it is evicted first:
+
+| total collected | what the buffer holds |
+| --- | --- |
+| below `buffer_size` | everything, population data included - promoting is lossless |
+| above `buffer_size` | only the most recent `buffer_size` transitions; the original population data is **already gone**, evicted in memory during training |
+
+So after a long online-RL session, `online_buffer_final` no longer contains the
+data you stood at the robot to collect, and promoting makes the cache match that.
+**This is the circular buffer doing what it was configured to do** - the eviction
+happened during training, not during promotion - but it means:
+
+* the promoted cache is a **window of the most recent `buffer_size` transitions**,
+  not an archive of everything ever collected;
+* to keep the original population buffer, keep the `<dest>.bak-<timestamp>`
+  folder the script leaves behind, which is the pre-promotion cache;
+* raising `algo.buffer_size` avoids the eviction, but `buffer_size` is itself in
+  the online cache hash (section 2), so changing it starts a new, empty cache and
+  you collect from scratch.
+
 ## 6. Do not lose the run folder
 
 `:2446-2456` runs `shutil.rmtree(run_cache_dir)` when `no_cleanup` is false -

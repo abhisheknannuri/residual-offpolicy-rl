@@ -38,10 +38,34 @@ independent reasons:
    BUFFER_POPULATION_ARCHITECTURE.md.
 
 So the correct operation is: replace the cache with the run's (larger) buffer.
-Nothing is lost, because the run's buffer is a superset - unless the circular
-`LazyTensorStorage(max_size=algo.buffer_size)` wrapped, in which case the oldest
-transitions were already evicted in memory and the run's buffer is simply the
-current state, which is what you want to resume from anyway.
+
+THE BUFFER IS CIRCULAR - READ THIS BEFORE A LONG SESSION
+--------------------------------------------------------
+The storage is `LazyTensorStorage(max_size=algo.buffer_size)`, which is circular.
+Once the buffer holds `algo.buffer_size` transitions (70,000 in the Station-1
+configs), every new transition **overwrites the oldest one**.
+
+The warm-up / population data is written FIRST, so it is evicted FIRST. After an
+online-RL session long enough to push the buffer past `buffer_size`, the
+original population transitions are already gone from the in-memory buffer - and
+therefore from `online_buffer_final` too. Promoting then makes the cache match
+what training actually had, which also means the cache no longer holds that
+original data.
+
+This is the circular buffer doing what it was configured to do, not something
+this script causes - the eviction already happened in memory, during training.
+But it has two practical consequences:
+
+  * Do not treat the promoted cache as an archive of everything ever collected.
+    It is a window of the most recent `buffer_size` transitions.
+  * If you want to keep the original population buffer, keep the
+    `<dest>.bak-<timestamp>` folder this script leaves behind (it is the
+    pre-promotion cache), or raise `algo.buffer_size` - though note that
+    `buffer_size` is itself in the online cache hash, so changing it starts a
+    new, empty cache.
+
+Below `buffer_size` nothing is evicted and the run's buffer is a strict superset
+of the cache, so promoting is lossless.
 
 USAGE
 -----

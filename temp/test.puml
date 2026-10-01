@@ -1,0 +1,30 @@
+@startuml test
+autonumber
+
+actor User
+participant "Client App" as Client
+participant "Auth Service" as Auth
+database "PostgreSQL" as DB
+
+User -> Client: Click Login
+activate Client
+
+Client -> Auth: POST /auth/login (creds)
+activate Auth
+
+Auth -> DB: Query user by email
+activate DB
+DB --> Auth: Return user record details
+deactivate DB
+
+alt Valid credentials
+    Auth --> Client: 200 OK + JWT Token
+    Client --> User: Redirect to Dashboard
+else Invalid credentials
+    Auth --> Client: 401 Unauthorized
+    Client --> User: Show error message
+end
+
+deactivate Auth
+deactivate Client
+@enduml

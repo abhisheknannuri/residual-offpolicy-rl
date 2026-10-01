@@ -50,9 +50,16 @@ Tick as they are closed; add to it rather than starting a new list elsewhere.
 - [ ] `temp.py` at the repo root is tracked scratch. Decide its fate.
 
 ### Real-robot / RL
-- [ ] `scripts/TrossenStation3Real/RL/` - residual-RL run scripts for Station 3
-      (blocked on four decisions: base ACT checkpoint, `LEARNING_STARTS`,
-      `REAL_MAX_STEPS`, `OFFLINE_EPISODES`).
+- [x] `scripts/TrossenStation3Real/RL/` - four residual-RL modes plus the
+      agentlace variants, sharing one `_common_rl.sh` whose hashed values are
+      `readonly`. Base ACT 50k, learning_starts 15000, real_max_steps 350,
+      178 offline episodes.
+- [ ] None of the Station-3 RL scripts has been run against hardware yet.
+- [ ] `_populate_offline_buffer()` needs only the policy server, but reaches it
+      via `env.policy`, so `get_envs()` connects the robot first
+      (`train_residual_td3.py:476-494`). Incidental coupling - could be decoupled
+      so the offline buffer can be built without the robot. Deliberately not
+      changed for now.
 - [x] Document the buffer caches and what invalidates them -
       `docs/real/BUFFER_CACHES.md`.
 - [x] `scripts/promote_online_buffer.py` - carry an online-RL session's buffer
