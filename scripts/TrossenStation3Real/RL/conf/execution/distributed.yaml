@@ -1,0 +1,14 @@
+# @package _global_
+# Actor (laptop, robot) + learner (GPU server) over agentlace's ZMQ transport.
+# Override on the command line:
+#   role=learner
+#   role=actor dist.ip=10.0.0.5
+# Over an SSH tunnel keep dist.ip=localhost and forward both ports:
+#   ssh -N -L 5588:localhost:5588 -L 5589:localhost:5589 user@server
+role: learner
+dist:
+  ip: localhost
+  port: 5588                # REQ/REP  actor -> learner (transitions, stats)
+  broadcast_port: 5589      # PUB/SUB  learner -> actor (weights)
+  steps_per_update: 50      # publish weights every N gradient steps (HIL-SERL: 50)
+  target_utd: null          # null = learner free-runs; 4 pins it to the single-process UTD

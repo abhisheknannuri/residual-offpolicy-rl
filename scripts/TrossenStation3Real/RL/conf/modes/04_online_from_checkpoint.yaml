@@ -1,0 +1,13 @@
+# @package _global_
+# 04 ONLINE RL RESUMING FROM A CHECKPOINT. Robot required.
+#   critic_warmup_steps: 0 because the checkpoint already carries a warm critic.
+#   Set resume_ckpt on the command line - either is valid:
+#     .../models/offline_step_<N>/checkpoint.pt      continue from OFFLINE RL
+#     .../models/critic_warmup_final/checkpoint.pt   continue from CRITIC WARM-UP
+algo:
+  critic_warmup_steps: 0
+  train_offline_rl: false
+  offline_rl_steps: 0
+  total_timesteps: 75000
+  offline_pretrain_only: false
+# resume_ckpt is intentionally left unset here - the run scripts require it.

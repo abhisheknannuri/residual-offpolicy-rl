@@ -1,0 +1,212 @@
+# =============================================================================
+# station3.yaml - every configurable parameter for Station-3 residual RL.
+#
+# This file holds VALUES only - no schema in `defaults`, so both the plain and
+# the distributed mode files can pull it in (they register different structured
+# configs: residual_td3_trossen_real_config vs ..._dist_config).
+#
+# Organised exactly like the dataclasses in resfit/rl_finetuning/config/.
+# Every field the schema defines is listed, so you can see the whole surface in
+# one place; values that match the dataclass default are still written out
+# explicitly rather than omitted.
+#
+# ### HASHED ###
+# Lines marked `# HASHED (...)` feed a replay-buffer cache key. CHANGE ONE AND
+# EVERY SCRIPT GETS A DIFFERENT, EMPTY BUFFER - you re-collect at the robot and
+# rebuild the offline buffer. Keeping them stable is YOUR responsibility; see
+# docs/real/BUFFER_CACHES.md for which value lands in which hash.
+# =============================================================================
+
+seed: 42
+torch_deterministic: false
+debug: false
+task: trossen_real    # HASHED (both)
+num_envs: 1
+eval_num_envs: 1
+eval_num_episodes: 0
+eval_horizon: null
+headless: true
+reward_shaping: false    # HASHED (offline)
+video_key: observation.images.agentview
+rl_camera:    # HASHED (both, as 'image_keys')
+- observation.images.cam_left_wrist
+- observation.images.cam_right_wrist
+algo:
+  total_timesteps: 75000
+  batch_size: 256    # HASHED (both (via offline/online batch size))
+  buffer_size: 70000    # HASHED (online)
+  learning_starts: 15000    # HASHED (online (as 'size'))
+  gamma: 0.9975    # HASHED (both)
+  num_updates_per_iteration: 4
+  actor_updates_per_iteration: 1
+  update_every_n_steps: 1
+  offline_fraction: 0.5    # HASHED (both (via offline/online batch size))
+  n_step: 3    # HASHED (both)
+  terminated_only_bootstrap: false
+  critic_warmup_steps: 0
+  actor_lr_warmup_steps: 0
+  random_action_noise_scale: [0.15, 0.15, 0.15, 0.05, 0.05, 0.05, 0.1]    # HASHED (online)
+  sampling_strategy: uniform    # HASHED (both)
+  prefetch_batches: 3
+  priority_alpha: 0.6
+  priority_beta: 0.4
+  stddev_max: 0.3
+  stddev_min: 0.1
+  stddev_step: 100000
+  stddev_schedule: linear(0.05,0.05,300000)
+  critic_warmup_save_freq: 5000
+  online_warmup_save_freq: 1000
+  use_base_policy_for_warmup: true
+  progressive_clipping_steps: 0
+  train_offline_rl: false
+  offline_rl_steps: 0
+  offline_rl_bc_alpha: 0.2
+  offline_eval_interval_every_steps: 5000
+  offline_save_freq: 5000
+  offline_rl_load_ckpt: latest
+  offline_rl_sampling_method: fixed_ratio
+  offline_rl_offline_ratio: 0.5
+  offline_pretrain_only: false
+agent:
+  device: cuda
+  actor_lr: 1e-06
+  critic_lr: 1e-06
+  critic_target_tau: 0.005
+  stddev_clip: 0.3
+  lr_warmup_steps: 0
+  lr_warmup_start: 1.0e-08
+  use_prop: 1
+  enc_type: vit
+  vit:
+    depth: 1
+    embed_dim: 128
+    embed_norm: 0
+    embed_style: embed2
+    num_heads: 4
+    patch_size: 8
+    stride: -1
+  critic:
+    drop: 0.0
+    feature_dim: 128
+    fuse_patch: 1
+    hidden_dim: 1024
+    norm_weight: 0
+    orth: 1
+    spatial_emb: 1024
+    num_q: 2
+    loss:
+      type: mse
+      n_bins: 51
+      v_min: 0.0
+      v_max: 1.0
+      sigma: -1.0
+    policy_gradient_type: min
+    num_layers: 2
+    use_layer_norm: true
+    min_q_heads: 2
+  actor:
+    feature_dim: 128
+    hidden_dim: 1024
+    dropout: 0.0
+    orth: 1
+    max_action_norm: -1.0
+    spatial_emb: 0
+    actor_last_layer_init_scale: 0.01
+    actor_last_layer_init_distribution: normal
+    actor_intermediate_layer_init_distribution: default
+    action_l2_reg_weight: 0.0
+    action_scale: [0.15, 0.15, 0.15, 0.05, 0.05, 0.05, 0.1]
+    num_layers: 2
+    use_layer_norm: true
+  critic_grad_clip_norm: 10.0
+  actor_grad_clip_norm: 10.0
+  bc_loss_coef: 0.0
+  bc_loss_dynamic: 0
+  bc_backprop_encoder: false
+  freeze_encoder: false
+  clip_q_target_to_reward_range: false
+  target_action_noise: true
+offline_data:
+  name: PickCubeAndInsert_Station3_Trial1_deltajoint_old    # HASHED (offline)
+  num_episodes: 178    # HASHED (offline)
+  use_base_policy_for_base_actions: true    # HASHED (offline)
+  min_action_range: 0.1    # HASHED (both)
+  min_state_std: 0.1    # HASHED (both)
+  image_size: 84
+  reward_parquet: null
+  reward_column: reward_pbrs
+  # HASHED, and deliberately NOT ${hydra:runtime.cwd}/... - that resolves to the
+  # LAUNCH directory, so running from anywhere but the repo root would silently
+  # change the offline cache hash and rebuild the buffer (verified: launching from
+  # /tmp gave root: /tmp/trossen_real/...). RESFIT_ROOT lets another machine point
+  # elsewhere without editing this file.
+  root: "${oc.env:RESFIT_ROOT,/home/qte9489/personal_abhi/temp/residual-offpolicy-rl}/trossen_real/datasets/PickCubeAndInsert_Station3_Trial1_deltajoint_old"    # HASHED (offline)
+  remap_preset: null
+wandb:
+  project: trossen-station3-pick-and-insert-residual-td3
+  mode: online
+  entity: null
+  notes: null
+  continue_run_id: null
+  name: null    # HASHED (both)
+  group: null
+log_freq: 100
+eval_interval_every_steps: 1000000
+checkpoint_interval: -1
+save_video: false
+eval_first: false
+actor_name: null
+real_hardware: true
+station_config_name: trossen_station3_single
+policy_server_url: "http://127.0.0.1:5070"
+real_action_space: delta_joint
+real_max_steps: 350    # HASHED (online (as 'horizon'))
+real_settle_time_s: 0.5
+enable_intervention: true
+real_log_file: null
+use_reward_manipulation_wrapper: false
+terminate_on_success: false
+dense_success_bonus_scale: null
+base_policy:
+  wandb_id: ''
+  wt_type: best
+  wt_version: latest
+  local_path: null
+reward_model:
+  enabled: false
+  backend: sarm
+  server_url: http://127.0.0.1:8001
+  request_timeout_s: 20.0
+  require_server: true
+  task_prompt: pick up the can and place it in the bin
+  query_every_k: 5
+  client_history_len: 40
+  image_key: observation.images.agentview
+  image_vflip: false
+  num_stages: 4
+  potentials:
+  - 0.0
+  - 0.05
+  - 0.1
+  - 0.15
+  pbrs_gamma: null
+  keep_sparse_term: true
+  reward_mode: pbrs
+  milestone_payouts:
+  - 0.0
+  - 0.1
+  - 0.1
+  - 0.1
+  milestone_success_bonus: 0.7
+  hysteresis_k: 5
+  conf_threshold: 0.8
+  monotonic: true
+  offline_key: null
+save_freq: 5000
+no_cleanup: true
+save_training_rollouts: false
+training_rollout_prob: 0.2
+resume_ckpt: null
+# NOTE: `role` and `dist.*` are deliberately NOT here. They exist only in the
+# distributed schema (ResidualTD3TrossenRealDistConfig), and the plain schema
+# would reject them. They live in conf/execution/*.yaml instead.

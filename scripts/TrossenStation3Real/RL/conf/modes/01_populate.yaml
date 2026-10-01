@@ -1,0 +1,17 @@
+# @package _global_
+# Mode values only - no schema, no station values. Shared by the plain and the
+# distributed entry files so the two can never drift.
+#
+# 01 POPULATE BOTH BUFFERS. Robot required.
+#   Builds the offline buffer from the dataset, collects the online warm-up,
+#   then stops. Nothing is trained.
+#   total_timesteps: 0 makes the online loop (`while global_step <= 0`) run a
+#   single step and exit cleanly. Ctrl+C after "Warm-up done. Online buffer
+#   size = N" is equally safe - the buffer is dumped immediately before it prints.
+algo:
+  critic_warmup_steps: 0
+  train_offline_rl: false
+  offline_rl_steps: 0
+  total_timesteps: 0
+  offline_pretrain_only: false
+resume_ckpt: null

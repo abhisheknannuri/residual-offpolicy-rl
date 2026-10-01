@@ -1,39 +1,26 @@
 #!/usr/bin/env bash
 # =============================================================================
-# 03 - CRITIC WARM-UP, THEN ONLINE RL.  Robot required.
+# [distributed] CRITIC WARM-UP THEN ONLINE RL - robot required
 # =============================================================================
-# The "ignore offline RL entirely" path: warm the critic from the two cached
-# buffers in this same process, then go straight into online RL. No checkpoint
-# from 02 is loaded.
+# Warms the critic from the cached buffers in this same process, then goes
+# straight into online RL. No checkpoint is loaded.
 #
-# The online buffer is loaded from its hashed cache, so the warm-up collection
-# from 01 is already in it and is NOT re-collected (the warm-up block is skipped
-# whenever the cache already holds >= LEARNING_STARTS transitions).
+# Config: conf/dist_03_online_from_criticwarmup.yaml  ->  conf/station3.yaml + conf/modes/dist_03_online_from_criticwarmup.yaml
+# Everything is in those files. Anything after this script is passed straight to
+# hydra, so a one-off tweak needs no edit:
+#     ./03_online_rl_from_criticwarmup.sh algo.total_timesteps=1000
 #
-# AFTERWARDS: everything this run collects lands in
-# run_<...>/online_buffer_final/ and is NOT written back to the hashed cache.
-# To carry it into the next session:
-#   .venv/bin/python scripts/promote_online_buffer.py \
-#       --from run_<...> --to <online hash> --apply
-# See docs/real/BUFFER_CACHES.md.
+# Role: pass it like any other hydra override -
+#     ./03_online_rl_from_criticwarmup.sh role=learner
+#     ./03_online_rl_from_criticwarmup.sh role=actor dist.ip=10.0.0.5
 #
-# DISTRIBUTED: pass the role as the first argument -
-#     ./03_online_rl_from_criticwarmup.sh learner      # GPU server
-#     LEARNER_IP=<server> ./03_online_rl_from_criticwarmup.sh actor    # laptop at the robot
-#     ./03_online_rl_from_criticwarmup.sh single       # no networking, parity check
+# PYTHON_BIN picks the interpreter (default: `python`). Set it, or activate the
+# venv - bare `python` is the conda env on this laptop until the environment
+# rework lands.
 # =============================================================================
 set -euo pipefail
-_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${_HERE}/../_common_rl.sh"   # the SAME shared config as the non-distributed scripts
-source "${_HERE}/_common_dist.sh"    # role + transport only
-
-MODE_NAME="[dist] 03 online RL after critic warm-up"
-MODE_DESC="critic warm-up from the cached buffers, then online RL at the robot"
-
-CRITIC_WARMUP=15000
-DO_OFFLINE_RL="false"
-OFFLINE_RL_STEPS=0
-TOTAL_TIMESTEPS=75000
-RESUME_CKPT=""
-
-source "${_HERE}/../_run_rl.sh"
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+exec "${PYTHON_BIN:-python}" resfit/rl_finetuning/scripts/train_residual_td3_distributed.py \
+    --config-dir scripts/TrossenStation3Real/RL/conf \
+    --config-name dist_03_online_from_criticwarmup \
+    "$@"

@@ -1,0 +1,4 @@
+# @package _global_
+# One process does everything, no networking. Only valid with the DISTRIBUTED
+# entrypoint, which is the only one whose schema has `role`/`dist`.
+role: single

@@ -1,0 +1,7 @@
+# Plain (single-process) entry config for mode 01_populate.
+# Composes: schema -> station3 values -> this mode's values.
+defaults:
+  - residual_td3_trossen_real_config
+  - station3
+  - modes/01_populate
+  - _self_

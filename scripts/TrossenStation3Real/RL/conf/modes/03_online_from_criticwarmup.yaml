@@ -1,0 +1,13 @@
+# @package _global_
+# 03 CRITIC WARM-UP THEN ONLINE RL. Robot required.
+#   The "ignore offline RL" path: warm the critic from the two cached buffers in
+#   this same process, then go straight into online RL. No checkpoint is loaded.
+#   The warm-up collection from 01 is already in the online cache, so it is not
+#   re-collected.
+algo:
+  critic_warmup_steps: 15000
+  train_offline_rl: false
+  offline_rl_steps: 0
+  total_timesteps: 75000
+  offline_pretrain_only: false
+resume_ckpt: null

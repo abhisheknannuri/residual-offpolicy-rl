@@ -1,0 +1,9 @@
+# Distributed (agentlace) entry config for mode 04_online_from_checkpoint.
+# Identical to 04_online_from_checkpoint.yaml except for the schema and the execution overlay - it
+# reuses the SAME station3 and modes/04_online_from_checkpoint files, so the two cannot drift.
+defaults:
+  - residual_td3_trossen_real_dist_config
+  - station3
+  - modes/04_online_from_checkpoint
+  - execution: distributed
+  - _self_

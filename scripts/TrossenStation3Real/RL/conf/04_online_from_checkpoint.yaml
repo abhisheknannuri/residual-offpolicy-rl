@@ -1,0 +1,7 @@
+# Plain (single-process) entry config for mode 04_online_from_checkpoint.
+# Composes: schema -> station3 values -> this mode's values.
+defaults:
+  - residual_td3_trossen_real_config
+  - station3
+  - modes/04_online_from_checkpoint
+  - _self_

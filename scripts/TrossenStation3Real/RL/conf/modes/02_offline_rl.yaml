@@ -1,0 +1,13 @@
+# @package _global_
+# 02 CRITIC WARM-UP + OFFLINE RL. No robot, no policy server, no cameras.
+#   offline_pretrain_only makes the trainer skip get_envs() entirely and exit
+#   after the offline phases. REQUIRES both caches to exist already, with the
+#   online one holding >= algo.learning_starts transitions.
+#   Produces models/critic_warmup_final/ and models/offline_step_<N>/.
+algo:
+  offline_pretrain_only: true
+  critic_warmup_steps: 20000
+  train_offline_rl: true
+  offline_rl_steps: 75000
+enable_intervention: false
+resume_ckpt: null

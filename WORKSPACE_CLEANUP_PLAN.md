@@ -51,9 +51,10 @@ Tick as they are closed; add to it rather than starting a new list elsewhere.
 
 ### Real-robot / RL
 - [x] `scripts/TrossenStation3Real/RL/` - four residual-RL modes plus the
-      agentlace variants, sharing one `_common_rl.sh` whose hashed values are
-      `readonly`. Base ACT 50k, learning_starts 15000, real_max_steps 350,
-      178 offline episodes.
+      agentlace variants, configured by YAML (`conf/station3.yaml` holds every
+      parameter; HASHED ones marked in caps). Base ACT 50k, learning_starts
+      15000, real_max_steps 350, 178 offline episodes. `check_configs.sh`
+      composes all 8 and asserts the hashed values match.
 - [ ] None of the Station-3 RL scripts has been run against hardware yet.
 - [ ] `_populate_offline_buffer()` needs only the policy server, but reaches it
       via `env.policy`, so `get_envs()` connects the robot first

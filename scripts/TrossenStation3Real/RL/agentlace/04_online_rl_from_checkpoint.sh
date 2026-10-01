@@ -1,51 +1,30 @@
 #!/usr/bin/env bash
 # =============================================================================
-# 04 - ONLINE RL RESUMING FROM A CHECKPOINT.  Robot required.
+# [distributed] ONLINE RL FROM A CHECKPOINT - robot required
 # =============================================================================
-# Starts online RL from weights 02 produced, with critic_warmup_steps=0 because
-# the critic is already warm - that is what the checkpoint carries.
+# Resumes from a checkpoint 02 produced; critic_warmup_steps is 0 because the
+# checkpoint already carries a warm critic.
 #
-# Point RESUME_CKPT at either:
-#   .../models/offline_step_<N>/checkpoint.pt    continue from OFFLINE RL
-#   .../models/critic_warmup_final/checkpoint.pt continue from the CRITIC WARM-UP
-# Both are the same code path; only the file differs.
+#   RESUME_CKPT=/abs/.../models/offline_step_75000/checkpoint.pt ./04_...sh
+#   RESUME_CKPT=/abs/.../models/critic_warmup_final/checkpoint.pt ./04_...sh
 #
-# Override without editing this file:
-#   RESUME_CKPT=/abs/path/to/checkpoint.pt ./04_online_rl_from_checkpoint.sh
+# Config: conf/dist_04_online_from_checkpoint.yaml  ->  conf/station3.yaml + conf/modes/dist_04_online_from_checkpoint.yaml
+# Everything is in those files. Anything after this script is passed straight to
+# hydra, so a one-off tweak needs no edit:
+#     ./04_online_rl_from_checkpoint.sh algo.total_timesteps=1000
 #
-# Same buffer note as 03: promote the run's online buffer afterwards if you want
-# the next session to start from it.
+# Role: pass it like any other hydra override -
+#     ./04_online_rl_from_checkpoint.sh role=learner
+#     ./04_online_rl_from_checkpoint.sh role=actor dist.ip=10.0.0.5
 #
-# DISTRIBUTED: pass the role as the first argument -
-#     ./04_online_rl_from_checkpoint.sh learner      # GPU server
-#     LEARNER_IP=<server> ./04_online_rl_from_checkpoint.sh actor    # laptop at the robot
-#     ./04_online_rl_from_checkpoint.sh single       # no networking, parity check
+# PYTHON_BIN picks the interpreter (default: `python`). Set it, or activate the
+# venv - bare `python` is the conda env on this laptop until the environment
+# rework lands.
 # =============================================================================
 set -euo pipefail
-_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${_HERE}/../_common_rl.sh"   # the SAME shared config as the non-distributed scripts
-source "${_HERE}/_common_dist.sh"    # role + transport only
-
-MODE_NAME="[dist] 04 online RL from checkpoint"
-MODE_DESC="resume from an offline-RL (or critic-warm-up) checkpoint, then online RL"
-
-CRITIC_WARMUP=0
-DO_OFFLINE_RL="false"
-OFFLINE_RL_STEPS=0
-TOTAL_TIMESTEPS=75000
-RESUME_CKPT="${RESUME_CKPT:-}"
-
-if [[ -z "${RESUME_CKPT}" ]]; then
-    echo "ERROR: RESUME_CKPT is empty." >&2
-    echo "       Set it at the top of this script, or pass it inline:" >&2
-    echo "         RESUME_CKPT=/abs/path/to/checkpoint.pt $0" >&2
-    echo "       Look under run_<timestamp>_<name>/models/ from script 02:" >&2
-    echo "         offline_step_<N>/checkpoint.pt    or    critic_warmup_final/checkpoint.pt" >&2
-    exit 1
-fi
-if [[ ! -f "${RESUME_CKPT}" ]]; then
-    echo "ERROR: RESUME_CKPT does not exist: ${RESUME_CKPT}" >&2
-    exit 1
-fi
-
-source "${_HERE}/../_run_rl.sh"
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+exec "${PYTHON_BIN:-python}" resfit/rl_finetuning/scripts/train_residual_td3_distributed.py \
+    --config-dir scripts/TrossenStation3Real/RL/conf \
+    --config-name dist_04_online_from_checkpoint \
+    resume_ckpt="${RESUME_CKPT:?set RESUME_CKPT to a checkpoint.pt - see run_<ts>_<name>/models/ from 02}" \
+    "$@"

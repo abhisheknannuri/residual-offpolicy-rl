@@ -1,34 +1,33 @@
-# Station 3 - distributed (agentlace) variants
+# Station 3 - distributed (agentlace)
 
 The same four modes as the parent folder, split into an actor (laptop, robot)
-and a learner (GPU server) over agentlace's ZMQ transport.
-
-These scripts **source `../_common_rl.sh`** - the identical file the
-non-distributed scripts use - and add only role and transport settings via
-`_common_dist.sh`. Nothing that affects training or the buffer hashes is
-duplicated here, so the two paths cannot drift apart.
+and a learner (GPU server).
 
 ```sh
-./03_online_rl_from_criticwarmup.sh learner             # GPU server
-LEARNER_IP=10.0.0.5 ./03_online_rl_from_criticwarmup.sh actor   # laptop
-./03_online_rl_from_criticwarmup.sh single              # parity check, no networking
+./03_online_rl_from_criticwarmup.sh role=learner
+./03_online_rl_from_criticwarmup.sh role=actor dist.ip=10.0.0.5
+./03_online_rl_from_criticwarmup.sh role=single     # no networking, parity check
 ```
 
-Over an SSH tunnel, keep `LEARNER_IP=localhost` and forward both ports:
+Over an SSH tunnel keep `dist.ip=localhost` and forward both ports:
 
 ```sh
 ssh -N -L 5588:localhost:5588 -L 5589:localhost:5589 user@server
 ```
 
-| env var | default | |
+These use `conf/dist_NN_*.yaml`, which compose the **distributed schema** plus
+the identical `conf/station3.yaml` and `conf/modes/*.yaml` the plain scripts use,
+plus `conf/execution/distributed.yaml` for role and transport. Nothing that
+affects training or the buffer hashes is duplicated.
+
+| key | default | |
 | --- | --- | --- |
-| `LEARNER_IP` | `localhost` | where the actor finds the learner |
-| `LEARNER_PORT` | `5588` | REQ/REP, actor -> learner (transitions, stats) |
-| `LEARNER_BROADCAST_PORT` | `5589` | PUB/SUB, learner -> actor (weights) |
-| `STEPS_PER_UPDATE` | `50` | weight publish cadence, in gradient steps |
-| `TARGET_UTD` | `null` | learner free-runs; set `4` to match the single-process UTD |
+| `role` | `learner` | `single` \| `actor` \| `learner` |
+| `dist.ip` | `localhost` | where the actor finds the learner |
+| `dist.port` | `5588` | REQ/REP, actor -> learner |
+| `dist.broadcast_port` | `5589` | PUB/SUB, learner -> actor (weights) |
+| `dist.steps_per_update` | `50` | weight publish cadence, in gradient steps |
+| `dist.target_utd` | `null` | learner free-runs; `4` matches the single-process UTD |
 
-`agentlace` itself is not pip-installed - it is imported from the clone at the
-repo root. `bash scripts/clone_deps.sh` restores it. See `DEPENDENCIES.md`.
-
-Design and background: `scripts/TrossenStation1Real/RESFIT_DISTRIBUTED_MIGRATION.md`.
+`agentlace` is not pip-installed - it is imported from the clone at the repo
+root, restored by `bash scripts/clone_deps.sh`. See `DEPENDENCIES.md`.
