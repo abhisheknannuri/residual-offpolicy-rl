@@ -24,24 +24,24 @@ else
     CONFIG_NAME="residual_td3_trossen_real_config"
 fi
 
-echo "┌──────────────────────────────────────────────────────────────"
-echo "│ MODE            ${MODE_NAME}"
-echo "│ ${MODE_DESC}"
-echo "├──────────────────────────────────────────────────────────────"
-echo "│ entry           ${ENTRY}"
-echo "│ python          ${PYTHON_BIN}"
-[[ "${DIST:-0}" == "1" ]] && echo "│ role            ${ROLE}  (learner ${LEARNER_IP}:${LEARNER_PORT})"
-echo "│ station         ${STATION_CONFIG_NAME}   policy_server ${POLICY_SERVER_URL}"
-echo "│ dataset         ${OFFLINE_DATASET}  (${OFFLINE_EPISODES} episodes)"
-echo "├── hashed (must be identical across every script here) ────────"
-echo "│ learning_starts ${LEARNING_STARTS}      real_max_steps ${REAL_MAX_STEPS}"
-echo "│ n_step ${N_STEP}  gamma ${GAMMA}  batch ${BATCH_SIZE}  offline_frac ${OFFLINE_FRACTION}"
-echo "│ buffer_size ${BUFFER_SIZE}  sampling ${SAMPLING}  wandb.name '${WANDB_NAME}'"
-echo "├── this mode ──────────────────────────────────────────────────"
-echo "│ offline_pretrain_only ${OFFLINE_PRETRAIN_ONLY}   train_offline_rl ${DO_OFFLINE_RL} (${OFFLINE_RL_STEPS} steps)"
-echo "│ critic_warmup_steps   ${CRITIC_WARMUP}   total_timesteps ${TOTAL_TIMESTEPS}"
-echo "│ resume_ckpt           ${RESUME_CKPT:-<none>}"
-echo "└──────────────────────────────────────────────────────────────"
+echo "┌──────────────────────────────────────────────────────────────" >&2
+echo "│ MODE            ${MODE_NAME}" >&2
+echo "│ ${MODE_DESC}" >&2
+echo "├──────────────────────────────────────────────────────────────" >&2
+echo "│ entry           ${ENTRY}" >&2
+echo "│ python          ${PYTHON_BIN}" >&2
+[[ "${DIST:-0}" == "1" ]] && echo "│ role            ${ROLE}  (learner ${LEARNER_IP}:${LEARNER_PORT})" >&2
+echo "│ station         ${STATION_CONFIG_NAME}   policy_server ${POLICY_SERVER_URL}" >&2
+echo "│ dataset         ${OFFLINE_DATASET}  (${OFFLINE_EPISODES} episodes)" >&2
+echo "├── hashed (must be identical across every script here) ────────" >&2
+echo "│ learning_starts ${LEARNING_STARTS}      real_max_steps ${REAL_MAX_STEPS}" >&2
+echo "│ n_step ${N_STEP}  gamma ${GAMMA}  batch ${BATCH_SIZE}  offline_frac ${OFFLINE_FRACTION}" >&2
+echo "│ buffer_size ${BUFFER_SIZE}  sampling ${SAMPLING}  wandb.name '${WANDB_NAME}'" >&2
+echo "├── this mode ──────────────────────────────────────────────────" >&2
+echo "│ offline_pretrain_only ${OFFLINE_PRETRAIN_ONLY}   train_offline_rl ${DO_OFFLINE_RL} (${OFFLINE_RL_STEPS} steps)" >&2
+echo "│ critic_warmup_steps   ${CRITIC_WARMUP}   total_timesteps ${TOTAL_TIMESTEPS}" >&2
+echo "│ resume_ckpt           ${RESUME_CKPT:-<none>}" >&2
+echo "└──────────────────────────────────────────────────────────────" >&2
 
 CMD=(
     "${PYTHON_BIN}" "${ENTRY}"
@@ -141,8 +141,12 @@ if [[ "${DIST:-0}" == "1" ]]; then
     )
 fi
 
+# DRY_RUN=1 prints one argument per line - readable, and safe to read back
+# programmatically (`printf %q` would escape the [ in list values into something
+# hydra cannot parse, which is exactly the kind of bug check_configs.sh exists
+# to catch).
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
-    printf '%q ' "${CMD[@]}"; echo
+    printf '%s\n' "${CMD[@]}"
     exit 0
 fi
 

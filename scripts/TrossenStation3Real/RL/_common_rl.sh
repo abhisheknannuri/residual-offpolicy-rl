@@ -89,7 +89,7 @@ CRITIC_GRAD_CLIP=10.0
 ACTOR_GRAD_CLIP=10.0
 BC_LOSS_COEF=0.0
 FREEZE_ENCODER="false"
-TARGET_ACTION_NOISE=0.1
+TARGET_ACTION_NOISE="true"        # bool, not a noise magnitude (rlpd.py:129)
 NUM_Q_HEADS=2
 MIN_Q_HEADS=2
 POLICY_GRADIENT_TYPE="min"
@@ -134,11 +134,14 @@ WANDB_ENTITY="${WANDB_ENTITY:-}"
 NO_CLEANUP="true"
 
 # --- mode defaults (each script overrides what it needs) ---------------------
-OFFLINE_PRETRAIN_ONLY="false"
-DO_OFFLINE_RL="false"
-OFFLINE_RL_STEPS=0
-OFFLINE_RL_SAVE_FREQ=5000
-CRITIC_WARMUP_SAVE_FREQ=5000
-CRITIC_WARMUP=0
-RESUME_CKPT=""
-REAL_LOG_FILE=""
+# `:-` so an env var set on the command line survives being sourced:
+#     RESUME_CKPT=/abs/path.pt ./04_online_rl_from_checkpoint.sh
+# A plain assignment here would clobber it before the mode script ever sees it.
+OFFLINE_PRETRAIN_ONLY="${OFFLINE_PRETRAIN_ONLY:-false}"
+DO_OFFLINE_RL="${DO_OFFLINE_RL:-false}"
+OFFLINE_RL_STEPS="${OFFLINE_RL_STEPS:-0}"
+OFFLINE_RL_SAVE_FREQ="${OFFLINE_RL_SAVE_FREQ:-5000}"
+CRITIC_WARMUP_SAVE_FREQ="${CRITIC_WARMUP_SAVE_FREQ:-5000}"
+CRITIC_WARMUP="${CRITIC_WARMUP:-0}"
+RESUME_CKPT="${RESUME_CKPT:-}"
+REAL_LOG_FILE="${REAL_LOG_FILE:-}"
