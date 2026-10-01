@@ -16,7 +16,11 @@
 # =============================================================================
 set -euo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-exec "${PYTHON_BIN:-python}" resfit/rl_finetuning/scripts/train_residual_td3.py \
+# PYTHONPATH: `python path/to/script.py` puts the SCRIPT's directory on
+# sys.path, not the repo root - and `trossen_real` is NOT part of the
+# editable install (pyproject.toml packages.find includes only "resfit*"),
+# so without this the run dies on `ModuleNotFoundError: trossen_real`.
+exec env PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}" "${PYTHON_BIN:-python}" resfit/rl_finetuning/scripts/train_residual_td3.py \
     --config-dir scripts/TrossenStation3Real/RL/conf \
     --config-name 02_offline_rl \
     "$@"

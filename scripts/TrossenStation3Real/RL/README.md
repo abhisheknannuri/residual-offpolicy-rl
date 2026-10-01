@@ -78,6 +78,30 @@ edit:
 ./02_offline_rl.sh --cfg job            # print the resolved config and exit
 ```
 
+### Testing without a robot
+
+Everything except the leader arm already stands in for itself: the cameras fall
+back to a mock feed when no RealSense is found (`camera_manager.py:_make_camera`)
+and the pedal falls back to dummy mode with no VEC device. Only the follower
+needs a stand-in, and the leader has no fallback by design - `get_envs()` raises
+rather than degrade silently.
+
+So two things: run the mock follower, and turn intervention off.
+
+```sh
+python -m trossen_real.follower.follower_single_server_mock \
+    --config trossen_station3_single --port 5060
+
+./01_populate_buffers.sh enable_intervention=false
+```
+
+With a policy server up, that builds the offline buffer end to end at a desk.
+Verified: 417 transitions from one episode, 32 `/predict_chunk` calls (≈13 frames
+per round trip at the server's `n_action_steps=14`), 3 `/reset` calls.
+
+Only the OFFLINE buffer is meaningful this way. The online warm-up will run, but
+nothing moves, so the transitions it collects are not worth keeping.
+
 ### Distributed
 
 ```sh
