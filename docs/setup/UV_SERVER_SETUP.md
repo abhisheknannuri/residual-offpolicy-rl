@@ -41,6 +41,11 @@ If it finishes with `resfit uv env OK`, you're done. If anything fails, jump to
 | **gcc/g++** (ideally 11–13) | `torchrl` is built **from source** | `gcc --version` |
 | **ffmpeg** on `PATH` | imageio writes eval/training videos | `which ffmpeg` |
 | GL libs for headless MuJoCo | offscreen rendering | see §3 |
+| **CUDA toolkit / NPP libs** | `torchcodec` links `libnppicc.so.12`; the driver alone is NOT enough | `ls /usr/local/cuda/targets/x86_64-linux/lib/libnppicc.so.12` |
+
+> This list has only ever been checked on a laptop that already satisfied all of
+> it. A bare server turned up a missing prerequisite not listed here - see
+> `SETUP_FIXES.md` §3b, still unresolved. Treat the list as incomplete.
 
 The trickiest one is the C++ toolchain — see §2.
 

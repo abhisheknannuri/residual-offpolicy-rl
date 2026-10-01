@@ -38,6 +38,14 @@ Tick as they are closed; add to it rather than starting a new list elsewhere.
       scripts, the infer app, and ad-hoc invocations - but needs an editable
       reinstall, which is why it belongs here rather than mid-flight.
 - [x] Remove the accidental conda dependency (ffmpeg) - done, section 7c.
+- [ ] **UNRESOLVED: `Could not load libtorchcodec` / `libnppicc.so.12` on the
+      server.** torchcodec links NVIDIA NPP, which on the working laptop comes
+      from the system CUDA toolkit (`/usr/local/cuda/.../libnppicc.so.12`) - not
+      pip, not conda, not the venv. `setup_uv_env.sh` cannot install it and did
+      not list it. Three candidate routes in `docs/setup/SETUP_FIXES.md` §3b,
+      none verified. Blocks the offline buffer build on the server.
+- [ ] Re-check `UV_SERVER_SETUP.md`'s prerequisite list against a genuinely bare
+      machine. It has only been validated on a laptop that already satisfied it.
 - [ ] Retire the conda env entirely once the above is settled.
 
 ### Scripts

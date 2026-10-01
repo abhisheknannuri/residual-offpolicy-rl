@@ -75,6 +75,63 @@ conda install -n residual -c conda-forge "ffmpeg>=6,<8" -y
 
 ---
 
+## 3b. `Could not load libtorchcodec` - missing NPP (`libnppicc.so.12`) — **UNRESOLVED**
+
+**Status: no verified fix yet.** Hit on a fresh server install, 2026-10-01. The
+routes below are candidates, none confirmed. If you solve it, replace this
+section with what actually worked.
+
+**Problem:** the same `RuntimeError: Could not load libtorchcodec` as §2 and §3,
+raised when the offline buffer build first decodes a video frame.
+
+**This is a THIRD cause, and the error message points at the wrong one.** It
+leads with *"FFmpeg is not properly installed"* and shows FFmpeg versions 4-8 all
+failing, which reads exactly like §3. It is not an FFmpeg problem - the loader
+never gets that far.
+
+**How to tell which cause you have.** Ignore the headline and read the inner
+`OSError`, which is repeated identically under every FFmpeg version:
+
+| inner error | cause | section |
+| --- | --- | --- |
+| `undefined symbol` / version complaint | torchcodec vs torch version mismatch | §2 |
+| `libavutil.so.* : cannot open shared object file` | FFmpeg genuinely missing | §3 |
+| `libnppicc.so.12: cannot open shared object file` | **this section** | - |
+
+**Why:** `libtorchcodec_core*.so` links against NVIDIA Performance Primitives.
+On the laptop where this works, `ldd` resolves it from the **system CUDA
+toolkit**:
+
+```
+libnppicc.so.12 => /usr/local/cuda/targets/x86_64-linux/lib/libnppicc.so.12
+```
+
+Not from pip, not from conda, not from the venv - so `scripts/setup_uv_env.sh`
+cannot install it and never listed it as a prerequisite. A machine with only the
+NVIDIA *driver* (enough for torch and CUDA tensors) does not have it.
+
+**Candidate routes, none verified:**
+
+1. **Force LeRobot onto the PyAV backend.** `get_safe_default_codec()`
+   (`deps/lerobot/lerobot/common/datasets/video_utils.py:32`) picks torchcodec
+   whenever the *module* is importable - and it is, it only fails to load its
+   `.so`. The backend is a plain constructor argument
+   (`lerobot_dataset.py:455`), and PyAV is already installed and working. This
+   sidesteps the dependency rather than chasing it, but needs a small code change
+   to pass `video_backend="pyav"` through `RemappedLeRobotDataset`.
+2. **`uv pip install nvidia-npp-cu12`** into the venv. No root. May still need
+   `LD_LIBRARY_PATH` pointing at `site-packages/nvidia/npp/lib`, because
+   torchcodec loads the library through a raw `ctypes.CDLL`.
+3. **Install the CUDA toolkit** (or just the NPP runtime) on the server. Needs
+   root. Matches what the working laptop actually has.
+
+**Wider point:** `UV_SERVER_SETUP.md`'s prerequisite list is incomplete. The
+installer has only ever been verified on a machine that already had the system
+CUDA toolkit, ffmpeg, gcc-11 and a driver - which proves it reproduces an
+environment *there*, not that it bootstraps a bare server.
+
+---
+
 ## 4. CUDA Out of Memory during training
 
 **Problem:** `torch.OutOfMemoryError` when running BC training with `--batch_size 256 --eval_num_envs 16` on a 16 GB GPU.

@@ -168,7 +168,7 @@ offline_data:
   # MUST be the '_old' v2.1 copy: the vendored lerobot is
   # CODEBASE_VERSION 'v2.1' and cannot read the v3.0 sibling.
   name: PickCubeAndInsert_Station3_Trial1_deltajoint_old    # HASHED (offline)
-  num_episodes: 178    # HASHED (offline)
+  num_episodes: 50    # HASHED (offline)
   # true = each offline transition's base action is fetched from
   # policy_server.py. This is why building the offline buffer needs
   # the policy server (and, incidentally, the robot).
@@ -209,7 +209,7 @@ real_max_steps: 350    # HASHED (online, as 'horizon')
 real_settle_time_s: 2.0
 # true = leader arm + foot pedal can take over mid-episode; those
 # transitions are stored with intervened=True.
-enable_intervention: true
+enable_intervention: false
 real_log_file: null
 
 # --- how we talk to policy_server.py -----------------------------------------
