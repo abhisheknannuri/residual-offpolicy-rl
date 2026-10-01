@@ -213,6 +213,37 @@ real_settle_time_s: 2.0
 # transitions are stored with intervened=True.
 enable_intervention: true
 real_log_file: null
+
+# --- how we talk to policy_server.py -----------------------------------------
+# These apply EVERYWHERE the base policy is queried - the offline buffer build,
+# the online warm-up and online RL - because they describe the wire format, not
+# a training choice.
+
+# How frames are packed into the request body.
+#   raw   uncompressed bytes + base64. ~512 KB per query for two 256x256 frames.
+#   zlib  the same bytes deflated. Lossless, ~3.3x smaller.
+#   jpeg  ~15x smaller at quality 95, and lossy - but measured on real wrist-cam
+#         frames it distorts LESS than the AV1 the LeRobot dataset is itself
+#         stored in (mean abs err 0.79 vs 1.39 on 0-255).
+# The offline build is 55,177 queries, one per dataset frame, so this is where
+# it is felt. NOT part of either cache hash: changing it will not invalidate an
+# existing buffer even though the base actions differ slightly, so keep it fixed
+# for a given buffer.
+policy_image_encoding: raw
+# 95 matches the infer app's default (INFER_JPEG_QUALITY) and encode_image's.
+policy_jpeg_quality: 95
+
+# Fetch a whole action chunk per request instead of one action per request.
+#   0   one POST /predict per query (unchanged behaviour)
+#   -1  POST /predict_chunk, chunk length = the server's own --n-action-steps
+#   N   POST /predict_chunk asking for N steps (server caps at chunk_size)
+# Changes the network pattern, not the actions: /predict already serves from
+# ACTPolicy.select_action()'s internal queue and ignores the observation for
+# k-1 of every k calls, so a client-side queue returns the identical sequence.
+# The queue is dropped on every policy.reset() - episode boundaries offline and
+# online, and the intervention release edge.
+policy_chunk_steps: 0
+
 use_reward_manipulation_wrapper: false
 terminate_on_success: false
 dense_success_bonus_scale: null

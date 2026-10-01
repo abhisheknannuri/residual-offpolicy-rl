@@ -48,9 +48,45 @@ for cfg in 01_populate 02_offline_rl 03_online_from_criticwarmup 04_online_from_
   done
 done
 
+# station3.yaml claims to list every parameter the schema defines. Adding a
+# config field and forgetting to surface it there is invisible otherwise - the
+# run still works, using a default nobody can see. This caught
+# policy_image_encoding / policy_jpeg_quality / policy_chunk_steps.
+echo
+if ! "$PY" - "$CONF/station3.yaml" <<'PYEOF'
+import subprocess, sys, yaml
+
+def flatten(node, prefix=""):
+    out = set()
+    for k, v in (node or {}).items():
+        key = f"{prefix}{k}"
+        out.add(key)
+        if isinstance(v, dict):
+            out |= flatten(v, key + ".")
+    return out
+
+schema_yaml = subprocess.run(
+    [sys.executable, "resfit/rl_finetuning/scripts/train_residual_td3.py",
+     "--config-name", "residual_td3_trossen_real_config", "--cfg", "job"],
+    capture_output=True, text=True).stdout
+schema = flatten(yaml.safe_load(schema_yaml))
+present = flatten(yaml.safe_load(open(sys.argv[1])))
+missing = sorted(schema - present)
+if missing:
+    print(f"  station3.yaml is MISSING {len(missing)} schema parameter(s):")
+    for m in missing:
+        print(f"    {m}")
+    sys.exit(1)
+print(f"  station3.yaml covers all {len(schema)} schema parameters")
+PYEOF
+then
+  fail=1
+fi
+
 echo
 if [[ $fail -eq 0 ]]; then
-  echo "  all 8 configs compose, and their HASHED values are identical"
+  echo "  all 8 configs compose, their HASHED values are identical, and every"
+  echo "  schema parameter is present in station3.yaml"
 else
   echo "  PROBLEMS FOUND (see above)"
 fi
