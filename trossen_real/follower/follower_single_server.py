@@ -54,21 +54,21 @@ curl -X POST http://127.0.0.1:5060/move_gripper \
 
 ========================= Left Follower Reset For Data Collection =======================
 
-curl -X POST http://127.0.0.1:5096/connect_to_robot
+curl -X POST http://127.0.0.1:5060/connect_to_robot
 
-curl -X POST http://127.0.0.1:5096/move_to_joint_positions \
+curl -X POST http://127.0.0.1:5060/move_to_joint_positions \
 -H "Content-Type: application/json" \
 -d '{"arr":[0,0,0,0,-0.1,0,0.4], "blocking": true, "min_time_to_move": 3}'
 
 Make sure you run teh hgetq api call and get something close to this
-curl -X POST http://127.0.0.1:5096/getq 
+curl -X POST http://127.0.0.1:5060/getq 
 {"q":[-0.004386968910694122,0.0009536888683214784,0.01735713705420494,0.009727626107633114,-0.09327077120542526,-0.004005493130534887,0.03994884341955185]}
 
-curl -X POST http://127.0.0.1:5096/disconnect_from_robot \
+curl -X POST http://127.0.0.1:5060/disconnect_from_robot \
 -H "Content-Type: application/json" \
 -d '{"skip_staged_position": true}'
 
-curl -X POST http://127.0.0.1:5096/move_gripper \
+curl -X POST http://127.0.0.1:5060/move_gripper \
      -H "Content-Type: application/json" \
      -d '{"gripper_pos": 0.42, "blocking": true, "min_time_to_move": 3}'
 ===========================================================================================

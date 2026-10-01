@@ -85,6 +85,49 @@ They reuse `conf/station3.yaml` and `conf/modes/*.yaml` unchanged - only the
 schema and the `execution` overlay differ - so the plain and distributed paths
 cannot drift. Verified by `check_configs.sh`.
 
+## Overriding
+
+Each `.sh` picks one config and passes everything after it straight to Hydra.
+
+```sh
+./01_populate_buffers.sh                       # conf/01_populate.yaml as-is
+./01_populate_buffers.sh algo.learning_starts=5000 wandb.mode=disabled
+./02_offline_rl.sh --cfg job --resolve         # print the resolved config, run nothing
+```
+
+Any key in `station3.yaml` can be overridden this way, including a HASHED one -
+which will send you to a different buffer, so check `--cfg job` first if you are
+not sure.
+
+### Picking a different config entirely
+
+The `.sh` files are a convenience. To run a config they do not name, call the
+entrypoint yourself:
+
+```sh
+python resfit/rl_finetuning/scripts/train_residual_td3.py \
+    --config-dir scripts/TrossenStation3Real/RL/conf \
+    --config-name 03_online_from_criticwarmup
+```
+
+### Distributed: `role` and the `execution` group
+
+The distributed configs include `execution: distributed`, which sets
+`role: learner` plus the transport defaults. Two ways to change it:
+
+```sh
+./agentlace/03_online_rl_from_criticwarmup.sh role=actor dist.ip=10.0.0.5
+./agentlace/03_online_rl_from_criticwarmup.sh execution=single    # swaps the whole group
+```
+
+`role=...` sets one key; `execution=single` swaps the whole overlay (role plus
+its transport block). Both verified.
+
+**`execution=` only works on the distributed configs.** On a plain one it fails
+with `Could not override 'execution'. No match in the defaults list.` - correct,
+because `role`/`dist` exist only in the distributed schema
+(`ResidualTD3TrossenRealDistConfig`), and the plain entrypoint would reject them.
+
 ## Settings
 
 | | | |
