@@ -1038,11 +1038,41 @@ def main(cfg: ResidualTD3DexmgConfig):
         episode_cache: dict[int, dict] = {}
         transitions = 0
         step_id = 0
+        prev_ep_idx: int | None = None
 
         for sample in tqdm(loader, desc="Processing offline dataset"):
             ep_idx = int(sample["episode_index"].item())
             if num_episodes is not None and ep_idx == num_episodes:
                 break
+
+            # --------------------------------------------------------------
+            # Reset the base policy at every episode boundary.
+            #
+            # policy_server.py's /predict calls ACTPolicy.select_action(), which
+            # keeps an internal queue and only runs the model when that queue is
+            # empty (modeling_act.py:127-133). So with n_action_steps=k, one call
+            # in k looks at the image you sent and the other k-1 return steps of
+            # a chunk planned from an EARLIER observation.
+            #
+            # Online that is bounded: TrossenResidualEnv.reset() calls
+            # policy.reset() every episode (real_residual_env.py:233), and
+            # InterventionManager calls it again on the release edge
+            # (intervention.py:82). Here the dataset is streamed with
+            # shuffle=False and episodes follow one another, so without this a
+            # chunk planned at the end of episode 4 would supply base actions for
+            # the first frames of episode 5 - base actions computed from a
+            # DIFFERENT episode's images, stored as this episode's labels.
+            #
+            # Resetting per episode (not per frame) is deliberate: it makes the
+            # offline labels match what the base policy does online, where it is
+            # also queried in chunks.
+            # --------------------------------------------------------------
+            if ep_idx != prev_ep_idx:
+                if real_hardware and real_policy_client is not None:
+                    real_policy_client.reset()
+                elif base_policy is not None:
+                    base_policy.reset()
+                prev_ep_idx = ep_idx
 
             # ------------------------------------------------------------------
             # Build observation and action directly for replay buffer ----------
