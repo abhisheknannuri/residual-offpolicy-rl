@@ -23,11 +23,11 @@
 # =============================================================================
 set -euo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
-# PYTHONPATH: `python path/to/script.py` puts the SCRIPT's directory on
-# sys.path, not the repo root - and `trossen_real` is NOT part of the
-# editable install (pyproject.toml packages.find includes only "resfit*"),
-# so without this the run dies on `ModuleNotFoundError: trossen_real`.
-exec env PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}" "${PYTHON_BIN:-python}" resfit/rl_finetuning/scripts/train_residual_td3_distributed.py \
+# `-m` so sys.path[0] is the repo root (we just cd'd there), not the
+# script's own directory. `trossen_real` is not part of the editable
+# install - pyproject.toml's packages.find includes only "resfit*" - so
+# running the file by path dies on `ModuleNotFoundError: trossen_real`.
+exec "${PYTHON_BIN:-python}" -m resfit.rl_finetuning.scripts.train_residual_td3_distributed \
     --config-dir scripts/TrossenStation3Real/RL/conf \
     --config-name dist_04_online_from_checkpoint \
     resume_ckpt="${RESUME_CKPT:?set RESUME_CKPT to a checkpoint.pt - see run_<ts>_<name>/models/ from 02}" \

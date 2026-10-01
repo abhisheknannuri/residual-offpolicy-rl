@@ -31,9 +31,6 @@ and from the dataclass default otherwise. Most of the untouched ones (the ViT
 shape, the reward-model block, critic widths) are defaults nobody has tuned, so
 treat them as inherited rather than chosen.
 
-`check_station1_parity.py` re-derives the Station-1 values straight from the
-shell scripts and diffs them against this file, so a value cannot quietly drift
-or be mistyped.
 
 Station-3's own decisions are the dataset, station name, W&B project, base ACT
 50k, `algo.learning_starts` 15000 and `real_max_steps` 350.

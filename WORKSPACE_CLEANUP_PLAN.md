@@ -24,6 +24,19 @@ Tick as they are closed; add to it rather than starting a new list elsewhere.
       and `uv-overrides.txt` (superseded by the above, if adopted).
 - [ ] Rebuild this workspace's `.venv` from the new setup, keeping `.venv.old`
       until a real robot session has run on it.
+- [ ] **Install `trossen_real` as a package.** `pyproject.toml`'s
+      `[tool.setuptools.packages.find] include = ["resfit*"]` means `trossen_real`
+      is a directory in the repo that nothing installs, so it is importable only
+      when the repo root happens to be on `sys.path`. Running a trainer by file
+      path (`python resfit/rl_finetuning/scripts/train_residual_td3.py`) puts the
+      SCRIPT's directory there, not the repo root, and dies on
+      `ModuleNotFoundError: trossen_real` - activating the venv does not help,
+      because the problem is what is importable, not which interpreter runs.
+      The Station-3 scripts work around it with `python -m`; Station-1's scripts
+      still call the trainer by path and have the same latent bug. Adding
+      `trossen_real*` to `packages.find` fixes it everywhere at once - the
+      scripts, the infer app, and ad-hoc invocations - but needs an editable
+      reinstall, which is why it belongs here rather than mid-flight.
 - [x] Remove the accidental conda dependency (ffmpeg) - done, section 7c.
 - [ ] Retire the conda env entirely once the above is settled.
 
