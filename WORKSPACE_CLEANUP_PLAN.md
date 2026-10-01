@@ -1,19 +1,61 @@
 # Workspace audit + cleanup plan
 
-Updated 2026-09-30. **Status: §5.1-§5.4 are DONE and committed locally.
-NOTHING HAS BEEN PUSHED.** Two commits sit on `dev/abhi-resfit-setup` ahead of
-`origin`:
-
-```
-5c1cbd0  Add trossen_real: the real-robot stack                  (89 files, 1.2 MB)
-a829378  Ignore vendored clones and recorded data; pin dependencies
-```
-
-Remaining: §5.5 docs move, §6-§7 the uv environment work.
+Updated 2026-10-01. The repo-hygiene work (sections 5.1-5.5) is **done, committed
+and pushed** to `origin/dev/abhi-resfit-setup`. The **environment work is not** -
+see the open items below.
 
 Safety net in place: branch `backup/pre-cleanup-20260930`, tarball
 `~/workspace_code_backup_20260930.tar.gz` (41 MB), and every deleted file copied
 to `~/resfit_bak_archive/root_junk_20260930/`.
+
+---
+
+## 0. Open items - keep this list current
+
+Tick as they are closed; add to it rather than starting a new list elsewhere.
+
+### Environment
+- [ ] **`uv` setup is NOT finished.** A declarative `pyproject.toml` was built and
+      proven in the throwaway env (section 7c) - `uv sync` builds everything, is
+      idempotent, and reproduces byte-for-byte - but it has **not been applied to
+      this workspace**, and the approach has not been signed off. Revisit.
+      Proposed files sit at `pyproject.proposed.toml` / `uv.lock.proposed`.
+- [ ] Decide whether to delete `scripts/setup_uv_env.sh`, `constraints-uv.txt`
+      and `uv-overrides.txt` (superseded by the above, if adopted).
+- [ ] Rebuild this workspace's `.venv` from the new setup, keeping `.venv.old`
+      until a real robot session has run on it.
+- [x] Remove the accidental conda dependency (ffmpeg) - done, section 7c.
+- [ ] Retire the conda env entirely once the above is settled.
+
+### Scripts
+- [ ] **`scripts/TrossenStation3Real/` is not general-purpose.** `prepare_dataset.sh`,
+      `_common_train.sh` and the three `train_act_*.sh` were written for one
+      specific dataset-preparation request, with hard-coded paths to that dataset
+      and to two sibling repos (`DatasetUtil`, a second `lerobot` checkout). They
+      work, but they are not reusable as-is. Revisit: parameterise or mark clearly
+      as one-off.
+- [ ] `scripts/TrossenStation1Real/evaluate_checkpoints.py` - same question, not
+      yet reviewed.
+- [ ] The 25 `scripts/CanAblationStudies/*.sh` are per-experiment copies; decide
+      whether they stay as a record or get collapsed into one parameterised script.
+
+### Repo hygiene
+- [x] `.gitignore`, junk removal, `DEPENDENCIES.md`, `clone_deps.sh` - done.
+- [x] `trossen_real/` committed and pushed - done.
+- [x] 28 root docs moved into `docs/` with references rewritten - done.
+- [ ] `docs/overview/ResFi-...md` links a `ResFiT_architecture.png` that has never
+      existed in the repo. Add the image or drop the link.
+- [ ] `sandbox/` (3 scratch scripts) - review and delete or keep.
+- [ ] 78 `*.bak` files are on disk and gitignored. Decide when to delete them.
+- [ ] `temp.py` at the repo root is tracked scratch. Decide its fate.
+
+### Real-robot / RL
+- [ ] `scripts/TrossenStation3Real/RL/` - residual-RL run scripts for Station 3
+      (in progress).
+- [ ] Eval campaign: 7 checkpoints x 20 poses done; the success differences are
+      within noise at n=20. Rerun the top few with more trials before concluding.
+- [ ] Pose 07 (11.8, 7.5) is dead centre and 0/7 across every checkpoint - watch
+      its videos.
 
 ---
 
