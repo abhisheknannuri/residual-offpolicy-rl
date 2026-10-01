@@ -203,9 +203,20 @@ Everything else is Station-1's values.
 
 ## Notes
 
-* **Interpreter is yours.** `PYTHON_BIN` defaults to `python`; set it or activate
-  the venv. On this laptop bare `python` is still the conda env, until the
-  environment rework lands.
+* **Interpreter.** Each script prints which python it is using, on stderr, as its
+  first line. The laptop has two working environments - the uv `.venv` and a
+  conda one - that differ on `av` (17 vs 15) and `cv2` (5.0 vs 4.11), and picking
+  the wrong one raises no error, so the line is there to be read.
+
+  | how you run it | interpreter |
+  | --- | --- |
+  | venv activated, no variable | `.venv/bin/python` |
+  | `PYTHON_BIN=.venv/bin/python ./01_...sh` | `.venv/bin/python` |
+  | nothing activated, no variable | **conda's** - bare `python` on this laptop |
+  | `PYTHON=... ./01_...sh` | **conda's** - the variable is `PYTHON_BIN`; `PYTHON` is ignored |
+
+  A relative `PYTHON_BIN` resolves against the repo root, because the script
+  `cd`s there first.
 * `offline_data.root` uses `${oc.env:RESFIT_ROOT,<abs path>}`, **not**
   `${hydra:runtime.cwd}`. The latter resolves to the launch directory - verified:
   running from `/tmp` produced `root: /tmp/trossen_real/...`, a different hash and

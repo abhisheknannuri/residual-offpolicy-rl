@@ -16,6 +16,12 @@
 # =============================================================================
 set -euo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+# Say which interpreter this is using. The laptop has two working envs (the
+# uv .venv and a conda one) that differ on av/cv2 versions, and picking the
+# wrong one raises no error - it just runs somewhere else. NOTE the variable
+# is PYTHON_BIN; PYTHON=... is silently ignored.
+echo "[$(basename "${BASH_SOURCE[0]}")] python: $("${PYTHON_BIN:-python}" -c 'import sys;print(sys.executable)')" >&2
+
 exec "${PYTHON_BIN:-python}" resfit/rl_finetuning/scripts/train_residual_td3.py \
     --config-dir scripts/TrossenStation3Real/RL/conf \
     --config-name 02_offline_rl \
