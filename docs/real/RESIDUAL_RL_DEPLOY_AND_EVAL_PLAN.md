@@ -20,6 +20,56 @@ Everything under "Measured" was run in this repo. Numbers come from
 
 ---
 
+## Status board
+
+Tick as things land. Only §1 is built; everything else is still a proposal
+awaiting your review.
+
+### Done
+
+- [x] **§1 Hermetic checkpoints** — `deployment` block on every checkpoint
+      (normalization, base-policy identity, obs spec, provenance). Commit
+      `3bf9e43`.
+- [x] Normalizers serialise and reconstruct **bit-exact** (`state_dict()` /
+      `from_state_dict()` on `ActionScaler` and `StateStandardizer`).
+- [x] `weights_sha256` in `policy_server.py`'s `/health` — weights-only,
+      portable, ignores `--n-action-steps`.
+- [x] One-time `/health` provenance check at startup in both trainers; fails
+      fast with `BasePolicyProvenanceError`.
+- [x] `assert_base_policy_matches()` for inference-time verification
+      (`strict` / `warn` / `off`).
+- [x] `base_policy.json` sidecar next to buffer caches; hashed metadata dicts
+      confirmed untouched.
+- [x] Updated `policy_server.py` pulled on the server (now git-tracked, so no
+      more `.bak` copies).
+
+### In flight
+
+- [ ] **Offline RL retrain** producing hermetic checkpoints — running on the
+      server.
+- [ ] Inspect one resulting checkpoint: `deployment` block present and
+      complete, `weights_sha256` matches the live server, normalizers
+      reconstruct, agent loads with 0 missing / 0 unexpected keys.
+
+### Not started — needs your review first
+
+- [ ] **§2–3 Run record** — one `run_id`, `ticks.parquet`, `rl_obs.zarr`,
+      replacing eight ad-hoc sinks.
+- [ ] **§4 Rerun** for visualisation instead of more Flask UI.
+- [ ] **§5 Config schema + presets** instead of the checkbox wall.
+- [ ] **§6 `ResidualPolicyClient`** — residual forward inside the policy client.
+- [ ] **§7 Q plots** factored out of `evaluate_checkpoints.py` as a reusable util.
+- [ ] **§8 Eval sweep axis** + campaign manifest for resumability.
+- [ ] Decisions **D2–D6** in §11 (D1 is resolved).
+
+### Before the next training run on a fresh machine
+
+- [ ] Policy server must be running **before** offline RL starts — it is no
+      longer optional, even with a cached buffer. See §1.
+
+
+---
+
 ## 0. Measured, not assumed
 
 ### Checkpoint
@@ -204,15 +254,20 @@ values.
 `base_policy` is `None` there and no `/health` query is attempted — there is no
 policy server to ask. Normalization and provenance are still recorded.
 
-### You must copy the server file
+### The server side lives in its own repo
 
-`policy_server.py` lives outside this repo, at
-`.../GeneralistRewardModels/lerobot/custom_scripts/policy_server.py`. The hash
-change cannot be pushed with this commit. Copy it to
-`~/Research/LEROBOT/lerobot/custom_scripts/policy_server.py` on the server and
-restart the policy server **before** starting training, or training will refuse
-to start with the "does not report weights_sha256" message. A timestamped
-`.bak-*` of the original is next to it.
+`policy_server.py` is not part of this repo, so the `_hash_checkpoint_weights()`
+change ships separately. It is now git-tracked on its own, which is why there
+are no more `.bak-*` copies next to it.
+
+Both sides are deployed on the server as of 2026-10-02. The ordering constraint
+remains for any **new** machine: the server must report `weights_sha256` before
+training starts, or training refuses with the "does not report weights_sha256"
+message.
+
+The two sides are coupled, so keep them in step: if the `deployment` block's
+`schema_version` is bumped, or `/health` gains a field the trainer records,
+both repos need the matching commit.
 
 ## 2. The logging problem, stated concretely
 
