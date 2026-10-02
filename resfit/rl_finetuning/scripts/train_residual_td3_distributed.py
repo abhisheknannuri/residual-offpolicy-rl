@@ -264,14 +264,15 @@ class _LazyRemotePolicyEnv:
     Connecting lazily means a cache hit never needs the policy server at all.
     """
 
-    def __init__(self, url: str):
+    def __init__(self, url: str, chunk_steps: int = 0):
         self._url = url
+        self._chunk_steps = int(chunk_steps)
         self._client = None
 
     @property
     def policy(self):
         if self._client is None:
-            from trossen_real.inference.policy_client import PolicyClient
+            from trossen_real.inference.policy_client import ChunkedPolicyClient, PolicyClient
 
             client = PolicyClient(self._url)
             health = client.health()
@@ -282,6 +283,31 @@ class _LazyRemotePolicyEnv:
                     "SSH-forward its port to this machine."
                 )
             print(f"[learner] querying base policy at {self._url} to populate the offline buffer")
+            # Chunked fetching: one round trip per N queries instead of per query.
+            # Only the NETWORK pattern changes - /predict already serves from
+            # ACTPolicy.select_action()'s internal queue, so a client-side queue
+            # returns the identical sequence. The offline build is one query per
+            # dataset frame, so this is where it is felt most. The wrapper drops
+            # its queue on reset(), which _populate_offline_buffer() calls at
+            # every episode boundary.
+            if self._chunk_steps:
+                if not health.get("supports_predict_chunk"):
+                    raise RuntimeError(
+                        f"[learner] policy_chunk_steps={self._chunk_steps} but policy_server.py at "
+                        f"{self._url} does not support /predict_chunk. Either it predates that "
+                        "endpoint, or the checkpoint is one where chunking would change the actions "
+                        "(temporal ensembling, or use_relative_actions=True) and the server refuses "
+                        "it. Set policy_chunk_steps=0 to use per-query /predict."
+                    )
+                n_steps = None if self._chunk_steps < 0 else self._chunk_steps
+                client = ChunkedPolicyClient(client, n_steps)
+                print(
+                    f"[learner] policy fetching: CHUNKED "
+                    f"({'server n_action_steps' if n_steps is None else n_steps} actions per round "
+                    f"trip; server reports n_action_steps={health.get('n_action_steps')})"
+                )
+            else:
+                print("[learner] policy fetching: per-query /predict (policy_chunk_steps=0)")
             self._client = client
         return self._client
 
@@ -550,7 +576,7 @@ def _make_get_envs(cfg):
             from trossen_real.cameras.camera_manager import CameraManager
             from trossen_real.config import load_station_config
             from trossen_real.human_intervention.pedal_listener import PedalListener
-            from trossen_real.inference.policy_client import PolicyClient
+            from trossen_real.inference.policy_client import ChunkedPolicyClient, PolicyClient
             from trossen_real.leader.trossen_leader_single import TrossenSingleLeader
             from trossen_real.rl.real_residual_env import TrossenResidualEnv
             from trossen_real.teleop.follower_client import FollowerClient
@@ -573,6 +599,34 @@ def _make_get_envs(cfg):
             if not policy_health.get("loaded"):
                 follower.disconnect()
                 raise RuntimeError(f"policy_server.py at {cfg.policy_server_url} has no policy loaded - {policy_health}")
+
+            # Chunked fetching for the live rollout: one round trip per N ticks
+            # instead of per tick. Only the NETWORK pattern changes - /predict
+            # already serves from ACTPolicy.select_action()'s internal queue, so
+            # a client-side queue returns the identical sequence. The wrapper
+            # drops its queue on reset(), which TrossenResidualEnv.reset() calls
+            # per episode and InterventionManager calls on the intervention
+            # release edge - the latter works because the env hands that manager
+            # this SAME object (real_residual_env.py:147).
+            if cfg.policy_chunk_steps:
+                if not policy_health.get("supports_predict_chunk"):
+                    follower.disconnect()
+                    raise RuntimeError(
+                        f"policy_chunk_steps={cfg.policy_chunk_steps} but policy_server.py at "
+                        f"{cfg.policy_server_url} does not support /predict_chunk. Either it predates "
+                        "that endpoint, or the checkpoint is one where chunking would change the "
+                        "actions (temporal ensembling, or use_relative_actions=True) and the server "
+                        "refuses it. Set policy_chunk_steps=0 to use per-query /predict."
+                    )
+                n_steps = None if cfg.policy_chunk_steps < 0 else int(cfg.policy_chunk_steps)
+                policy_client = ChunkedPolicyClient(policy_client, n_steps)
+                print(
+                    f"[actor] policy fetching: CHUNKED "
+                    f"({'server n_action_steps' if n_steps is None else n_steps} actions per round "
+                    f"trip; server reports n_action_steps={policy_health.get('n_action_steps')})"
+                )
+            else:
+                print("[actor] policy fetching: per-query /predict (policy_chunk_steps=0)")
 
             cameras = CameraManager(station_config)
             cameras.start()
@@ -617,6 +671,8 @@ def _make_get_envs(cfg):
                 # (_query_base_action()) is unaffected - always sends the full-res frame.
                 rl_image_size=cfg.offline_data.image_size,
                 log_file=cfg.real_log_file,
+                policy_image_encoding=cfg.policy_image_encoding,
+                policy_jpeg_quality=cfg.policy_jpeg_quality,
             )
 
         # Build the stage-aware reward-model config (training env only). Passed as a
@@ -720,6 +776,18 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
         assert cfg.algo.use_base_policy_for_warmup, (
             "real_hardware=True requires algo.use_base_policy_for_warmup=true - the 'pure random minus "
             "base' warm-up mode can imply arbitrarily large corrections and is not safe on real hardware."
+        )
+        # Checked here rather than on the first frame: an invalid value would
+        # otherwise surface only after the robot is connected and the dataset
+        # loaded. Both roles validate, so a typo cannot reach only one side.
+        from trossen_real.inference.policy_client import IMAGE_ENCODINGS
+
+        assert cfg.policy_image_encoding in IMAGE_ENCODINGS, (
+            f"policy_image_encoding must be one of {list(IMAGE_ENCODINGS)}, "
+            f"got {cfg.policy_image_encoding!r}"
+        )
+        assert 1 <= cfg.policy_jpeg_quality <= 100, (
+            f"policy_jpeg_quality must be in [1, 100], got {cfg.policy_jpeg_quality}"
         )
     if cfg.reward_model.enabled and not cfg.algo.terminated_only_bootstrap:
         logger.warning(
@@ -912,14 +980,16 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
     comms.attach_online_buffer(online_rb)
     comms.online_size = len(online_rb)
 
-    env = _LazyRemotePolicyEnv(cfg.policy_server_url)
+    env = _LazyRemotePolicyEnv(cfg.policy_server_url, cfg.policy_chunk_steps)
     # ↓↓↓ verbatim from train_residual_td3.py:936-1347
     # Normalization functions already defined above - use them
 
     # ------------------------------------------------------------------
     # Convert offline dataset episodes into transitions and fill buffer
     # ------------------------------------------------------------------
-    def _dataset_sample_to_json_obs(sample: dict, image_keys: list[str]) -> dict:
+    def _dataset_sample_to_json_obs(sample: dict, image_keys: list[str],
+                                    image_encoding: str = "raw",
+                                    jpeg_quality: int = 95) -> dict:
         """Build the JSON body `policy_server.py`'s `/predict` expects, directly
         from a LeRobotDataset sample's NATIVE-resolution image tensors - used by
         `_populate_offline_buffer()`'s real-hardware branch (no live
@@ -943,7 +1013,7 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
         for key in image_keys:
             chw = sample[key].float().squeeze(0)  # (3, H, W), native resolution, [0, 1]
             hwc_uint8 = (chw.clamp(0, 1) * 255.0).round().byte().permute(1, 2, 0).numpy()
-            obs[key] = encode_image(hwc_uint8)
+            obs[key] = encode_image(hwc_uint8, image_encoding, jpeg_quality)
         return obs
 
     def _populate_offline_buffer(
@@ -958,6 +1028,8 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
         real_hardware: bool = False,
         real_policy_client=None,
         post_resize=None,
+        policy_image_encoding: str = "raw",
+        policy_jpeg_quality: int = 95,
     ) -> int:
         """
         Iterates through *dataset* sequentially, converts consecutive frames
@@ -1022,7 +1094,8 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
                     # touches a local in-process ACTPolicy (none is loaded for real
                     # hardware; the checkpoint's lerobot version may not even match
                     # this repo's vendored resfit.lerobot ACT implementation).
-                    json_obs = _dataset_sample_to_json_obs(sample, image_keys)
+                    json_obs = _dataset_sample_to_json_obs(
+                        sample, image_keys, policy_image_encoding, policy_jpeg_quality)
                     base_action_np = real_policy_client.predict(json_obs)  # (7,) real units
                     base_action = torch.from_numpy(np.asarray(base_action_np, dtype=np.float32)).unsqueeze(0)
                     base_action_scaled = action_scaler.scale(base_action.squeeze(0).cpu())
@@ -1309,6 +1382,8 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
                 real_hardware=cfg.real_hardware,
                 real_policy_client=env.policy if _query_base_actions_from_remote_policy else None,
                 post_resize=offline_image_transforms if _query_base_actions_from_remote_policy else None,
+                policy_image_encoding=cfg.policy_image_encoding,
+                policy_jpeg_quality=cfg.policy_jpeg_quality,
             )
 
             print(f"Added {added} offline transitions to buffer (size={len(offline_rb)})")
@@ -2304,6 +2379,18 @@ def _actor_body(cfg, comms: ActorComms, fp_hash: str, fp_flat: dict, device, dev
         assert cfg.algo.use_base_policy_for_warmup, (
             "real_hardware=True requires algo.use_base_policy_for_warmup=true - the 'pure random minus "
             "base' warm-up mode can imply arbitrarily large corrections and is not safe on real hardware."
+        )
+        # Checked here rather than on the first frame: an invalid value would
+        # otherwise surface only after the robot is connected and the dataset
+        # loaded. Both roles validate, so a typo cannot reach only one side.
+        from trossen_real.inference.policy_client import IMAGE_ENCODINGS
+
+        assert cfg.policy_image_encoding in IMAGE_ENCODINGS, (
+            f"policy_image_encoding must be one of {list(IMAGE_ENCODINGS)}, "
+            f"got {cfg.policy_image_encoding!r}"
+        )
+        assert 1 <= cfg.policy_jpeg_quality <= 100, (
+            f"policy_jpeg_quality must be in [1, 100], got {cfg.policy_jpeg_quality}"
         )
 
     # If a stage-aware reward model is enabled, verify the server is reachable
