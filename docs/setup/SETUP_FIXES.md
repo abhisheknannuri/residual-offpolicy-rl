@@ -75,22 +75,19 @@ conda install -n residual -c conda-forge "ffmpeg>=6,<8" -y
 
 ---
 
-## 3b. `Could not load libtorchcodec` - missing NPP (`libnppicc.so.12`) — **UNRESOLVED**
-
-**Status: no verified fix yet.** Hit on a fresh server install, 2026-10-01. The
-routes below are candidates, none confirmed. If you solve it, replace this
-section with what actually worked.
+## 3b. `Could not load libtorchcodec` - missing NPP (`libnppicc.so.12`)
 
 **Problem:** the same `RuntimeError: Could not load libtorchcodec` as §2 and §3,
-raised when the offline buffer build first decodes a video frame.
+raised when the offline buffer build first decodes a video frame. Seen on a fresh
+server install, 2026-10-01.
 
 **This is a THIRD cause, and the error message points at the wrong one.** It
 leads with *"FFmpeg is not properly installed"* and shows FFmpeg versions 4-8 all
 failing, which reads exactly like §3. It is not an FFmpeg problem - the loader
-never gets that far.
+never gets that far, and §3's `conda install ffmpeg` will not help.
 
 **How to tell which cause you have.** Ignore the headline and read the inner
-`OSError`, which is repeated identically under every FFmpeg version:
+`OSError`, repeated identically under every FFmpeg version:
 
 | inner error | cause | section |
 | --- | --- | --- |
@@ -98,32 +95,53 @@ never gets that far.
 | `libavutil.so.* : cannot open shared object file` | FFmpeg genuinely missing | §3 |
 | `libnppicc.so.12: cannot open shared object file` | **this section** | - |
 
-**Why:** `libtorchcodec_core*.so` links against NVIDIA Performance Primitives.
-On the laptop where this works, `ldd` resolves it from the **system CUDA
-toolkit**:
+**Why:** `libtorchcodec_core*.so` links against NVIDIA Performance Primitives. On
+a machine where this works without intervention, `ldd` resolves it from the
+**system CUDA toolkit**:
 
 ```
 libnppicc.so.12 => /usr/local/cuda/targets/x86_64-linux/lib/libnppicc.so.12
 ```
 
-Not from pip, not from conda, not from the venv - so `scripts/setup_uv_env.sh`
-cannot install it and never listed it as a prerequisite. A machine with only the
-NVIDIA *driver* (enough for torch and CUDA tensors) does not have it.
+Not from pip, not conda, not the venv - so `scripts/setup_uv_env.sh` cannot
+install it and never listed it as a prerequisite. A machine with only the NVIDIA
+*driver* (enough for torch and CUDA tensors) does not have it.
 
-**Candidate routes, none verified:**
+**Fix (verified on the server, 2026-10-02):** install NPP from PyPI and point the
+loader at it. No root needed.
 
-1. **Force LeRobot onto the PyAV backend.** `get_safe_default_codec()`
-   (`deps/lerobot/lerobot/common/datasets/video_utils.py:32`) picks torchcodec
-   whenever the *module* is importable - and it is, it only fails to load its
-   `.so`. The backend is a plain constructor argument
-   (`lerobot_dataset.py:455`), and PyAV is already installed and working. This
-   sidesteps the dependency rather than chasing it, but needs a small code change
-   to pass `video_backend="pyav"` through `RemappedLeRobotDataset`.
-2. **`uv pip install nvidia-npp-cu12`** into the venv. No root. May still need
-   `LD_LIBRARY_PATH` pointing at `site-packages/nvidia/npp/lib`, because
-   torchcodec loads the library through a raw `ctypes.CDLL`.
-3. **Install the CUDA toolkit** (or just the NPP runtime) on the server. Needs
-   root. Matches what the working laptop actually has.
+```bash
+uv pip install nvidia-npp-cu12
+export LD_LIBRARY_PATH="$(python -c 'import site; print(site.getsitepackages()[0])')/nvidia/npp/lib:${LD_LIBRARY_PATH}"
+python -c "import torchcodec; print('torchcodec loaded successfully')"
+```
+
+The `export` is needed because torchcodec loads the library through a raw
+`ctypes.CDLL`, which does not look inside pip's `nvidia/` package directories.
+
+**Make it stick.** As written above it lasts one shell. Append it to the venv's
+activate script so `source .venv/bin/activate` does it every time:
+
+```bash
+cat >> .venv/bin/activate <<'EOF'
+
+# torchcodec links libnppicc.so.12 (NVIDIA NPP). Pip ships it under
+# nvidia/npp/lib, which ctypes.CDLL does not search. See SETUP_FIXES.md 3b.
+export LD_LIBRARY_PATH="$VIRTUAL_ENV/lib/python3.10/site-packages/nvidia/npp/lib:${LD_LIBRARY_PATH}"
+EOF
+```
+
+Note this is lost whenever the venv is rebuilt. The durable fix is for
+`setup_uv_env.sh` to install `nvidia-npp-cu12` and append that line itself -
+tracked in `WORKSPACE_CLEANUP_PLAN.md` under the environment rework.
+
+**Alternative, not needed if the above works:** force LeRobot onto the PyAV
+backend. `get_safe_default_codec()`
+(`deps/lerobot/lerobot/common/datasets/video_utils.py:32`) selects torchcodec
+whenever the *module* is importable - and it is, it only fails to load its `.so`.
+The backend is a plain constructor argument (`lerobot_dataset.py:455`) and PyAV
+is already installed, so passing `video_backend="pyav"` sidesteps NPP entirely.
+Needs a small code change to thread it through `RemappedLeRobotDataset`.
 
 **Wider point:** `UV_SERVER_SETUP.md`'s prerequisite list is incomplete. The
 installer has only ever been verified on a machine that already had the system
