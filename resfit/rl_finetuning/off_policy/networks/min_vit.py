@@ -24,7 +24,7 @@ class PatchEmbed1(nn.Module):
 
 
 class PatchEmbed2(nn.Module):
-    def __init__(self, embed_dim, use_norm):
+    def __init__(self, embed_dim, use_norm, img_size=84):
         super().__init__()
         layers = [
             nn.Conv2d(3, embed_dim, kernel_size=8, stride=4),
@@ -34,8 +34,11 @@ class PatchEmbed2(nn.Module):
         ]
         self.embed = nn.Sequential(*layers)
 
-        # self.num_patch = 121  # if input image is 96x96, then num_patch = 121
-        self.num_patch = 81  # if input image is 84x84, then num_patch = 81
+        # Patch count follows from img_size through the conv stack above, so a
+        # new image size needs no edit here. 84 -> 81, 96 -> 121, 112 -> 169.
+        with torch.no_grad():
+            h, w = self.embed(torch.zeros(1, 3, img_size, img_size)).shape[-2:]
+        self.num_patch = h * w
         self.patch_dim = embed_dim
 
     def forward(self, x: torch.Tensor):
@@ -89,14 +92,14 @@ class TransformerLayer(nn.Module):
 
 
 class MinVit(nn.Module):
-    def __init__(self, embed_style, embed_dim, embed_norm, num_head, depth):
+    def __init__(self, embed_style, embed_dim, embed_norm, num_head, depth, img_size=84):
         super().__init__()
 
         if embed_style == "embed1":
             raise NotImplementedError("embed1 is not tested")
             # self.patch_embed = PatchEmbed1(embed_dim)
         if embed_style == "embed2":
-            self.patch_embed = PatchEmbed2(embed_dim, use_norm=embed_norm)
+            self.patch_embed = PatchEmbed2(embed_dim, use_norm=embed_norm, img_size=img_size)
         else:
             raise NotImplementedError(f"Unknown embed style {embed_style}")
 

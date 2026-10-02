@@ -113,6 +113,11 @@ agent:
     embed_norm: 0
     embed_style: embed2
     num_heads: 4
+    # UNUSED. Declared in VitEncoderConfig but read nowhere; MinVit does not
+    # accept them and PatchEmbed2 hardcodes its conv stack:
+    #   conv1 3->embed_dim kernel 8 stride 4,  conv2 kernel 3 stride 2.
+    # Setting them to any value builds an identical network. The patch count
+    # follows image_size through those hardcoded kernels, not through these.
     patch_size: 8
     stride: -1
   critic:
@@ -175,7 +180,17 @@ offline_data:
   use_base_policy_for_base_actions: true    # HASHED (offline)
   min_action_range: 0.1    # HASHED (both)
   min_state_std: 0.1    # HASHED (both)
-  # frames are resized to 84x84 AFTER the policy query, before storing.
+  # frames are resized to this AFTER the policy query, before storing. Only the
+  # RL encoder/critic/actor see the resized frames; the base policy always gets
+  # full-resolution ones. The ViT patch count is DERIVED from this through
+  # PatchEmbed2's conv stack (conv1 k8 s4, conv2 k3 s2):
+  #   c1 = floor((S - 8) / 4) + 1
+  #   c2 = floor((c1 - 3) / 2) + 1
+  #   num_patch = c2 * c2
+  #   84 -> 81   96 -> 121   112 -> 169   128 -> 225   160 -> 361
+  # repr_dim = num_patch * agent.vit.embed_dim * len(rl_camera), so 84 gives
+  # 20736. Nothing else needs changing to move this; a buffer built at one size
+  # cannot be reused at another, so point at a fresh one.
   image_size: 84
   reward_parquet: null
   reward_column: reward_pbrs
