@@ -79,6 +79,11 @@ from resfit.rl_finetuning.off_policy.distributed.comms import (
 )
 from resfit.rl_finetuning.off_policy.distributed.nstep_stream import NStepStream
 from resfit.rl_finetuning.off_policy.rl.q_agent import QAgent
+from resfit.rl_finetuning.utils.deployment import (
+    base_policy_identity,
+    build_deployment_meta,
+    write_buffer_sidecar,
+)
 from resfit.rl_finetuning.utils.checkpoint import load_checkpoint, save_checkpoint
 from resfit.rl_finetuning.utils.dtype import to_uint8
 from resfit.rl_finetuning.utils.hugging_face import (
@@ -789,6 +794,29 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
         assert 1 <= cfg.policy_jpeg_quality <= 100, (
             f"policy_jpeg_quality must be in [1, 100], got {cfg.policy_jpeg_quality}"
         )
+
+    # ---------------------------------------------------------------------
+    # Deployment metadata - built ONCE here, embedded in every checkpoint this
+    # run saves (critic warm-up, offline RL, online RL, resume alike).
+    #
+    # The /health query is deliberately unconditional for real hardware, even
+    # when the offline buffer comes from cache and no base action is ever
+    # fetched: what is being recorded is the base policy's IDENTITY, not its
+    # output. A residual is a correction to one specific ACT checkpoint and is
+    # meaningless against any other, so a checkpoint that cannot name its base
+    # is not reproducible. Training refuses to start rather than produce one.
+    # ---------------------------------------------------------------------
+    _base_policy_identity = None
+    if cfg.real_hardware:
+        _base_policy_identity = base_policy_identity(cfg.policy_server_url)
+        print(colored(
+            f"[learner] base BC policy pinned: weights_sha256="
+            f"{_base_policy_identity['weights_sha256'][:16]}... "
+            f"({_base_policy_identity['server_checkpoint_path']})", "green"))
+    _deployment_meta = build_deployment_meta(
+        cfg, action_scaler, state_standardizer, _base_policy_identity
+    )
+
     if cfg.reward_model.enabled and not cfg.algo.terminated_only_bootstrap:
         logger.warning(
             "reward_model.enabled=True but algo.terminated_only_bootstrap=False. "
@@ -1394,6 +1422,7 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
 
             with open(cache_dir / "user_metadata.json", "w") as f:
                 json.dump(offline_cache_meta, f, indent=2)
+            write_buffer_sidecar(cache_dir, _deployment_meta)
 
             if OFFLINE_HF_REPO is not None:
                 _hf_upload_buffer(OFFLINE_HF_REPO, cache_dir, cache_hash)
@@ -1457,6 +1486,7 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
             optimized_replay_buffer_dumps(online_rb, online_cache_dir)
             with open(online_cache_dir / "user_metadata.json", "w") as f:
                 json.dump(online_cache_meta, f, indent=2)
+            write_buffer_sidecar(online_cache_dir, _deployment_meta)
             next_save_threshold += _save_freq
         # ↑↑↑ end verbatim train_residual_td3.py:1488-1496 (re-indented -4)
         # ↓↓↓ verbatim from train_residual_td3.py:1499-1507
@@ -1464,6 +1494,7 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
         optimized_replay_buffer_dumps(online_rb, online_cache_dir)
         with open(online_cache_dir / "user_metadata.json", "w") as f:
             json.dump(online_cache_meta, f, indent=2)
+        write_buffer_sidecar(online_cache_dir, _deployment_meta)
         if ONLINE_HF_REPO is not None:
             _hf_upload_buffer(ONLINE_HF_REPO, online_cache_dir, online_cache_hash)
         print(f"Warm-up done. Online buffer size = {len(online_rb)} transitions")
@@ -1656,6 +1687,7 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
                     config=cfg,
                     success_rate=0.0,
                     actor_updates=0,  # critic-only phase - the actor is never updated here
+                    deployment=_deployment_meta,
                 )
                 print(colored(f"Critic-warmup checkpoint saved @ {step_dir} (step {i + 1})", "magenta"))
 
@@ -1671,6 +1703,7 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
                 config=cfg,
                 success_rate=0.0,
                 actor_updates=0,
+                deployment=_deployment_meta,
             )
             print(colored(f"Final critic-warmup checkpoint saved @ {final_dir}", "magenta"))
 
@@ -1802,6 +1835,7 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
                             config=cfg,
                             success_rate=current_offline_success,
                             actor_updates=i // policy_delay,
+                            deployment=_deployment_meta,
                         )
                         if wandb.run is not None:
                             art_best = wandb.Artifact(name=f"run_{wandb.run.id}_offline_best", type="model")
@@ -1818,6 +1852,7 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
                         config=cfg,
                         success_rate=eval_metrics.get("eval/success_rate", 0.0) if 'eval_metrics' in locals() else 0.0,
                         actor_updates=i // policy_delay,
+                        deployment=_deployment_meta,
                     )
                     print(colored(f"Offline Checkpoint saved @ {offline_save_dir}", "magenta"))
                     
@@ -2090,6 +2125,7 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
                 config=cfg,
                 success_rate=best_eval_success_rate,
                 actor_updates=actor_updates,
+                deployment=_deployment_meta,
             )
 
             # 2) Overwrite the "latest" directory (for resume)
@@ -2104,6 +2140,7 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
                 config=cfg,
                 success_rate=best_eval_success_rate,
                 actor_updates=actor_updates,
+                deployment=_deployment_meta,
             )
 
             print(
@@ -2306,6 +2343,7 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
             config=cfg,
             success_rate=best_eval_success_rate,
             actor_updates=actor_updates,
+            deployment=_deployment_meta,
         )
         print(colored(f"Final checkpoint saved @ {final_dir}", "magenta"))
 

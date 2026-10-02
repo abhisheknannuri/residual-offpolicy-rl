@@ -74,6 +74,7 @@ def save_checkpoint(
     global_step: int,
     config: Any = None,
     success_rate: float | None = None,
+    deployment: dict | None = None,
     **extra_data: Any,
 ) -> None:
     """Save a QAgent checkpoint.
@@ -84,6 +85,12 @@ def save_checkpoint(
         global_step: Current training step
         config: Training configuration (optional)
         success_rate: Success rate when checkpoint was saved (optional)
+        deployment: the block from `utils/deployment.py::build_deployment_meta()` -
+            normalization stats, base BC policy identity, obs spec and provenance.
+            This is what makes a checkpoint deployable on its own: with it,
+            inference needs no dataset and can verify it is running against the
+            base policy it was actually trained on. Built ONCE at startup and
+            passed to every save in the run.
         **extra_data: Additional data to include in checkpoint
     """
     checkpoint_path = Path(checkpoint_path)
@@ -126,6 +133,8 @@ def save_checkpoint(
             checkpoint_data["config"] = config
     if success_rate is not None:
         checkpoint_data["success_rate"] = success_rate
+    if deployment is not None:
+        checkpoint_data["deployment"] = deployment
 
     torch.save(checkpoint_data, checkpoint_path)
     print(f"💾 Saved checkpoint to: {checkpoint_path}")

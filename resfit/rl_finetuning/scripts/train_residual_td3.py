@@ -66,6 +66,11 @@ from resfit.rl_finetuning.utils.hugging_face import (
     optimized_replay_buffer_dumps,
     optimized_replay_buffer_loads,
 )
+from resfit.rl_finetuning.utils.deployment import (
+    base_policy_identity,
+    build_deployment_meta,
+    write_buffer_sidecar,
+)
 from resfit.rl_finetuning.utils.checkpoint import load_checkpoint, save_checkpoint
 from resfit.rl_finetuning.utils.normalization import ActionScaler, StateStandardizer
 from resfit.rl_finetuning.utils.rb_transforms import MultiStepTransform
@@ -665,6 +670,28 @@ def main(cfg: ResidualTD3DexmgConfig):
             "real_hardware=True requires algo.use_base_policy_for_warmup=true - the 'pure random minus "
             "base' warm-up mode can imply arbitrarily large corrections and is not safe on real hardware."
         )
+
+    # ---------------------------------------------------------------------
+    # Deployment metadata - built ONCE here, embedded in every checkpoint this
+    # run saves (critic warm-up, offline RL, online RL, resume alike).
+    #
+    # The /health query is deliberately unconditional for real hardware, even
+    # when the offline buffer comes from cache and no base action is ever
+    # fetched: what is being recorded is the base policy's IDENTITY, not its
+    # output. A residual is a correction to one specific ACT checkpoint and is
+    # meaningless against any other, so a checkpoint that cannot name its base
+    # is not reproducible. Training refuses to start rather than produce one.
+    # ---------------------------------------------------------------------
+    _base_policy_identity = None
+    if cfg.real_hardware:
+        _base_policy_identity = base_policy_identity(cfg.policy_server_url)
+        print(colored(
+            f"Base BC policy pinned: weights_sha256="
+            f"{_base_policy_identity['weights_sha256'][:16]}... "
+            f"({_base_policy_identity['server_checkpoint_path']})", "green"))
+    _deployment_meta = build_deployment_meta(
+        cfg, action_scaler, state_standardizer, _base_policy_identity
+    )
 
     # If a stage-aware reward model is enabled, verify the server is reachable
     # BEFORE building envs / loading data, and enforce terminated-only bootstrap.
@@ -1428,6 +1455,7 @@ def main(cfg: ResidualTD3DexmgConfig):
 
             with open(cache_dir / "user_metadata.json", "w") as f:
                 json.dump(offline_cache_meta, f, indent=2)
+            write_buffer_sidecar(cache_dir, _deployment_meta)
 
             if OFFLINE_HF_REPO is not None:
                 _hf_upload_buffer(OFFLINE_HF_REPO, cache_dir, cache_hash)
@@ -1583,6 +1611,7 @@ def main(cfg: ResidualTD3DexmgConfig):
                 optimized_replay_buffer_dumps(online_rb, online_cache_dir)
                 with open(online_cache_dir / "user_metadata.json", "w") as f:
                     json.dump(online_cache_meta, f, indent=2)
+                write_buffer_sidecar(online_cache_dir, _deployment_meta)
                 next_save_threshold += _save_freq
 
             obs = next_obs  # roll state
@@ -1590,6 +1619,7 @@ def main(cfg: ResidualTD3DexmgConfig):
         optimized_replay_buffer_dumps(online_rb, online_cache_dir)
         with open(online_cache_dir / "user_metadata.json", "w") as f:
             json.dump(online_cache_meta, f, indent=2)
+        write_buffer_sidecar(online_cache_dir, _deployment_meta)
         if ONLINE_HF_REPO is not None:
             _hf_upload_buffer(ONLINE_HF_REPO, online_cache_dir, online_cache_hash)
         print(f"Warm-up done. Online buffer size = {len(online_rb)} transitions")
@@ -1775,6 +1805,7 @@ def main(cfg: ResidualTD3DexmgConfig):
                     config=cfg,
                     success_rate=0.0,
                     actor_updates=0,  # critic-only phase - the actor is never updated here
+                    deployment=_deployment_meta,
                 )
                 print(colored(f"Critic-warmup checkpoint saved @ {step_dir} (step {i + 1})", "magenta"))
 
@@ -1790,6 +1821,7 @@ def main(cfg: ResidualTD3DexmgConfig):
                 config=cfg,
                 success_rate=0.0,
                 actor_updates=0,
+                deployment=_deployment_meta,
             )
             print(colored(f"Final critic-warmup checkpoint saved @ {final_dir}", "magenta"))
 
@@ -1919,6 +1951,7 @@ def main(cfg: ResidualTD3DexmgConfig):
                             config=cfg,
                             success_rate=current_offline_success,
                             actor_updates=i // policy_delay,
+                            deployment=_deployment_meta,
                         )
                         if wandb.run is not None:
                             art_best = wandb.Artifact(name=f"run_{wandb.run.id}_offline_best", type="model")
@@ -1935,6 +1968,7 @@ def main(cfg: ResidualTD3DexmgConfig):
                         config=cfg,
                         success_rate=eval_metrics.get("eval/success_rate", 0.0) if 'eval_metrics' in locals() else 0.0,
                         actor_updates=i // policy_delay,
+                        deployment=_deployment_meta,
                     )
                     print(colored(f"Offline Checkpoint saved @ {offline_save_dir}", "magenta"))
                     
@@ -2185,6 +2219,7 @@ def main(cfg: ResidualTD3DexmgConfig):
                         config=cfg,
                         success_rate=current_success_rate,
                         actor_updates=actor_updates,
+                        deployment=_deployment_meta,
                     )
                     print(
                         colored(
@@ -2224,6 +2259,7 @@ def main(cfg: ResidualTD3DexmgConfig):
                 config=cfg,
                 success_rate=best_eval_success_rate,
                 actor_updates=actor_updates,
+                deployment=_deployment_meta,
             )
 
             # 2) Overwrite the "latest" directory (for resume)
@@ -2238,6 +2274,7 @@ def main(cfg: ResidualTD3DexmgConfig):
                 config=cfg,
                 success_rate=best_eval_success_rate,
                 actor_updates=actor_updates,
+                deployment=_deployment_meta,
             )
 
             print(
@@ -2510,6 +2547,7 @@ def main(cfg: ResidualTD3DexmgConfig):
             config=cfg,
             success_rate=best_eval_success_rate,
             actor_updates=actor_updates,
+            deployment=_deployment_meta,
         )
         print(colored(f"Final checkpoint saved @ {final_dir}", "magenta"))
 

@@ -56,6 +56,13 @@ class ActionScaler:
         self.action_scale = action_scale # from .sh it is 0.2 and default is 0.1
         self.min_range_per_dim = min_range_per_dim # default ad from .sh is 0.1
 
+        # The RAW dataset stats this scaler was built from, kept so a checkpoint
+        # can carry them and `from_state_dict()` can rebuild an identical scaler
+        # through this very same __init__ - no reimplementation of the maths
+        # below, so the reconstruction cannot drift from the original.
+        self._raw_action_min = action_min.detach().cpu().clone()
+        self._raw_action_max = action_max.detach().cpu().clone()
+
         # Move inputs to device
         action_min = action_min.to(self.device) # 7d array
         action_max = action_max.to(self.device) # 7d array
@@ -98,6 +105,31 @@ class ActionScaler:
     def limits(self) -> Limits:
         """Get the action limits."""
         return self._limits
+
+    def state_dict(self) -> dict:
+        """Everything needed to rebuild this scaler, with no dataset present.
+
+        The raw dataset stats plus the two scalars - deliberately NOT the
+        derived `_limits`/`_range`, so `from_state_dict()` re-runs the same
+        __init__ and can never drift from how training built it.
+        """
+        scale = self.action_scale
+        return {
+            "action_min": self._raw_action_min,
+            "action_max": self._raw_action_max,
+            "action_scale": scale.detach().cpu().tolist() if torch.is_tensor(scale) else scale,
+            "min_range_per_dim": self.min_range_per_dim,
+        }
+
+    @classmethod
+    def from_state_dict(cls, sd: dict, device: torch.device | str = "cpu") -> ActionScaler:
+        return cls(
+            action_min=torch.as_tensor(sd["action_min"], dtype=torch.float32),
+            action_max=torch.as_tensor(sd["action_max"], dtype=torch.float32),
+            action_scale=sd["action_scale"],
+            min_range_per_dim=sd["min_range_per_dim"],
+            device=device,
+        )
 
     def scale(self, action: torch.Tensor) -> torch.Tensor:
         """
@@ -216,6 +248,10 @@ class StateStandardizer:
         self.device = torch.device(device)
         self.min_std = min_std
 
+        # See ActionScaler._raw_action_min - same reasoning.
+        self._raw_state_mean = state_mean.detach().cpu().clone()
+        self._raw_state_std = state_std.detach().cpu().clone()
+
         # Move to device and apply safeguards
         self._mean = state_mean.to(self.device)
         self._std = torch.maximum(state_std.to(self.device), torch.tensor(min_std, device=self.device))
@@ -223,6 +259,23 @@ class StateStandardizer:
         print("StateStandardizer initialized:")
         print(f"  Mean range: [{self._mean.min():.4f}, {self._mean.max():.4f}]")
         print(f"  Std range: [{self._std.min():.6f}, {self._std.max():.6f}]")
+
+    def state_dict(self) -> dict:
+        """Raw dataset stats + min_std - see ActionScaler.state_dict()."""
+        return {
+            "state_mean": self._raw_state_mean,
+            "state_std": self._raw_state_std,
+            "min_std": self.min_std,
+        }
+
+    @classmethod
+    def from_state_dict(cls, sd: dict, device: torch.device | str = "cpu") -> StateStandardizer:
+        return cls(
+            state_mean=torch.as_tensor(sd["state_mean"], dtype=torch.float32),
+            state_std=torch.as_tensor(sd["state_std"], dtype=torch.float32),
+            min_std=sd["min_std"],
+            device=device,
+        )
 
     def standardize(self, state: torch.Tensor) -> torch.Tensor:
         """
