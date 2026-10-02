@@ -173,7 +173,7 @@ offline_data:
   # MUST be the '_old' v2.1 copy: the vendored lerobot is
   # CODEBASE_VERSION 'v2.1' and cannot read the v3.0 sibling.
   name: PickCubeAndInsert_Station3_Trial1_deltajoint_old    # HASHED (offline)
-  num_episodes: 50    # HASHED (offline)
+  num_episodes: 178    # HASHED (offline)
   # true = each offline transition's base action is fetched from
   # policy_server.py. This is why building the offline buffer needs
   # the policy server (and, incidentally, the robot).
@@ -197,7 +197,8 @@ offline_data:
   # Absolute path to the dataset directory. Edit it when the repo or the
   # dataset lives somewhere else (e.g. on the server), or override per run:
   #     ./01_populate_buffers.sh offline_data.root=/abs/path/to/dataset
-  root: /home/qte9489/personal_abhi/temp/residual-offpolicy-rl/trossen_real/datasets/PickCubeAndInsert_Station3_Trial1_deltajoint_old    # HASHED (offline)
+  # root: /home/qte9489/personal_abhi/temp/residual-offpolicy-rl/trossen_real/datasets/PickCubeAndInsert_Station3_Trial1_deltajoint_old    # HASHED (offline)
+  root: /home/qte9489/Research/DatasetUtils/CubePickAndInsert_TrossenReal/Station3_Trial1/PickCubeAndInsert_Station3_Trial1_deltajoint_old/
   remap_preset: null
 wandb:
   project: trossen-station3-pick-and-insert-residual-td3
@@ -224,7 +225,7 @@ real_max_steps: 350    # HASHED (online, as 'horizon')
 real_settle_time_s: 2.0
 # true = leader arm + foot pedal can take over mid-episode; those
 # transitions are stored with intervened=True.
-enable_intervention: false
+enable_intervention: true
 real_log_file: null
 
 # --- how we talk to policy_server.py -----------------------------------------
@@ -242,7 +243,7 @@ real_log_file: null
 # it is felt. NOT part of either cache hash: changing it will not invalidate an
 # existing buffer even though the base actions differ slightly, so keep it fixed
 # for a given buffer.
-policy_image_encoding: raw
+policy_image_encoding: jpeg
 # 95 matches the infer app's default (INFER_JPEG_QUALITY) and encode_image's.
 policy_jpeg_quality: 95
 
@@ -255,7 +256,7 @@ policy_jpeg_quality: 95
 # k-1 of every k calls, so a client-side queue returns the identical sequence.
 # The queue is dropped on every policy.reset() - episode boundaries offline and
 # online, and the intervention release edge.
-policy_chunk_steps: 0
+policy_chunk_steps: -1
 
 use_reward_manipulation_wrapper: false
 terminate_on_success: false
