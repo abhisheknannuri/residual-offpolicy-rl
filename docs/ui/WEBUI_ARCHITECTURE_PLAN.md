@@ -225,17 +225,38 @@ divergence we add is a merge conflict later.
 **Verdict:** keep the fork thin and upstream-shaped. Push generic improvements
 (a real robot registry, for instance) upstream rather than carrying them.
 
-### 4.3 Rerun — visualisation we should not build
+### 4.3 Rerun — a viewer, and specifically NOT an archive
 
 [Rerun](https://rerun.io) is purpose-built for robotics: time-aligned images,
-scalars, transforms and 3D with a scrubbing viewer. **`rerun-sdk 0.35.0` is
-already installed in this repo's venv.** Measured here: **0.79 ms/tick** to log
-2 images + 9 scalars; a 350-step episode produces a ~15 MB `.rrd`. It also
-ships `serve_web_viewer()` and `serve_grpc()`, so it can serve its viewer into
-a browser tab.
+scalars, transforms and 3D with a scrubbing viewer. `rerun-sdk 0.35.0` is
+already installed here. Measured in this venv: **0.79 ms/tick** to log 2 images
++ 9 scalars; ~15 MB `.rrd` per 350-step episode.
 
-**Verdict:** this is the answer for live signal inspection and post-hoc
-debugging. Do not build time-series plotting, video scrubbing, or 3D into Flask.
+**It cannot be the logging archive.** Tested: the installed version has no
+read-back API at all —
+
+```text
+import rerun.dataframe   ->  ModuleNotFoundError
+submodules present: archetypes, blueprint, catalog, components,
+                    datatypes, experimental, utilities
+```
+
+So an `.rrd` is write-only from your own code's perspective: you can view it,
+but you cannot pull 7,000 ticks of images back out for a batched Q recompute,
+or `groupby` a sweep in pandas. (Latest is 0.38.1 and newer versions do add a
+dataframe API — but that is three minor versions of a 0.x format away, and it
+does not fix the deeper issue: `.rrd` is a visualisation format whose
+readability is tied to one SDK's version, and this is thesis data that must open
+in 2029.)
+
+**Verdict: a sink, not the source of truth.** Rerun earns its place for two
+things nothing else covers — **live** streaming while the robot moves, and a
+scrubbing timeline you do not have to build. Everything retrospective should be
+served from the archive instead.
+
+Note it is also the first genuinely useful *separate-process subscriber* (§6.7):
+`rr.connect_grpc()` publishes from the camera-owning process to a viewer process
+that can crash and restart without the robot noticing.
 
 ### 4.4 Foxglove / MCAP
 
@@ -245,7 +266,23 @@ the cost of a dependency plus a writer plus a reader.
 
 **Verdict:** skip. Revisit only if ROS enters the picture.
 
-### 4.5 BEAVR
+### 4.5 Intrinsic Core — right ideas, wrong weight class
+
+Alphabet's Intrinsic open-sourced [Intrinsic Core](https://github.com/intrinsic-ai/sdk)
+at ROSCon in September 2026 (Apache 2.0): a local runtime, SDK and real-time
+control framework for industrial robotics.
+
+Why it does not fit: the runtime is a **k3s containerized environment** managing
+process lifecycle, event scheduling and application state sync. That is a
+sensible answer for industrial fleets and pure overhead for one arm on one
+workstation.
+
+What is worth stealing is conceptual: their **"skills"** abstraction — package
+each capability as a reusable module behind a declared interface. That is the
+same instinct as `ActionSource` and the robot descriptor below, independently
+arrived at by a much larger team, which is mild evidence the seam is real.
+
+### 4.6 BEAVR
 
 [BEAVR](https://arxiv.org/html/2508.09606v1) — open-source bimanual
 multi-embodiment VR teleoperation, explicitly designed for heterogeneous
@@ -254,7 +291,7 @@ platforms from 7-DoF arms to humanoids.
 **Verdict:** not adopting (no VR hardware), but its **multi-embodiment
 abstraction** is worth reading as a design reference for §5.
 
-### 4.6 What the survey did *not* turn up
+### 4.7 What the survey did *not* turn up
 
 No open-source tool covers **structured, resumable, multi-checkpoint policy
 evaluation campaigns with human stage annotation**. Our eval app's design —
@@ -374,20 +411,98 @@ robot-registry question entirely.
 
 ---
 
+## 5A. Three protocols, each with one reason to change
+
+The single most important design decision in this document. Three abstractions
+are circling each other and **must not merge**, because each changes for a
+different reason:
+
+| protocol | job | changes when |
+| --- | --- | --- |
+| **`Robot`** | device I/O — `connect`, `disconnect`, `calibrate`, health, `get_observation`, `send_action` | you buy different hardware |
+| **`Env`** (gym) | RL semantics — `reset`, `step`, spaces, horizon, reward | the task or RL formulation changes |
+| **`ActionSource`** | where an action comes from — leader, BC, ResFiT, replay | you add a policy or an input device |
+
+### `Env` already exists; do not reuse it for the UI
+
+`TrossenResidualEnv` is already gym-shaped — `gym.spaces.Dict`,
+`gym.spaces.Box`, `reset()`, `step()`, `metadata` — which is exactly why one
+trainer runs both MuJoCo and the real arm. That abstraction is **done**.
+
+The trap is reusing it for the UI. A UI needs connect/disconnect, calibration,
+per-camera frames and health, and has no notion of "step" or "episode return".
+Force one class to serve both and you get an `Env` with `calibrate()` bolted on,
+or a `Robot` pretending to have a reward. LeRobot keeps `Robot` separate from any
+env for this exact reason. Keep them separate.
+
+### `ActionSource` — the seam that collapses teleop/infer/eval
+
+```python
+class ActionSource(Protocol):
+    def get_action(self, obs) -> Action: ...
+    def reset(self) -> None: ...
+```
+
+`LeaderArm`, `SpaceMouse`, `BCPolicy`, `ResFiT`, `ReplayFromDataset` are all
+implementations. A new method is one small class.
+
+**It must return the FINAL action, not a residual.** If the framework does
+`clamp(base + residual)` it has baked ResFiT's combination rule and
+normalisation into the framework — and not all residual methods combine the same
+way (different spaces, different blending, chunked residuals). Each source owns
+its own composition and hands back something executable. The framework's job is
+to *ask* and to *log*, never to do the method's maths. This also correctly puts
+"query the base policy" inside `ResFiT`, which is the thing that knows it needs
+one.
+
+Teleoperators are a sub-case LeRobot already names: `Teleoperator` with
+`get_action()` / `send_feedback()`. Leader arm, gamepad, SpaceMouse, keyboard,
+phone — all the same shape.
+
+### One more small protocol
+
+```python
+class InterventionTrigger(Protocol):
+    def is_active(self) -> bool: ...
+```
+
+Pedal today; keyboard or a gamepad button later. Trivial, and it stops
+"intervention" from meaning "pedal" throughout the codebase.
+
 ## 6. Proposed architecture
 
 ### 6.1 Three surfaces, not three apps
 
 | surface | what it is | build or adopt |
 | --- | --- | --- |
-| **A. Robot Console** | drive the robot: teleop, inference, eval campaigns | **build** (merge of the two Flask apps) |
-| **B. Data Browser** | datasets, run records, episodes, annotations, labels, Q plots | **extend** the existing Next.js visualizer |
-| **C. Signal Inspector** | live and post-hoc time-aligned signals, images, 3D | **adopt Rerun** |
+| **A. Robot Console** | drive the robot: teleop, inference, eval execution | **build** (merge of the two Flask apps) |
+| **B. Data Browser** | datasets, run records, episodes, annotations, labels, eval campaigns, Q plots | **extend** the existing Next.js visualizer |
+| **(C.) Live Inspector** | live signals while the robot moves | **adopt Rerun** — a tool, not a pillar (§4.3) |
 
-The split is by *interaction model*, which is why it holds: A is a realtime
-control panel with a human and a moving robot; B is an archive you browse; C is
-a scrubbing timeline. Those want different UIs, and forcing them into one page
-is how you get the current checkbox wall.
+Rerun is deliberately parenthesised. On review it is **not** a third surface: it
+is one optional subscriber. Once the Data Browser reads run records, Rerun's
+only irreplaceable job is *live* viewing during a run (§4.3). Skip it entirely
+if you only ever look at runs afterwards.
+
+The split follows one rule: **does it need the exclusive devices?**
+
+- Cameras are RealSense, claimed per-process (`cfg.enable_device(serial)`), so
+  only one process can hold them.
+- The leader arm and pedal are likewise held in-process.
+- The **follower arm is already behind an HTTP service**
+  (`follower_single_server.py`) — both current apps are just clients, so the arm
+  is not the constraint. The cameras are.
+
+Everything that must touch cameras/leader/pedal lives in A. Everything that only
+reads files lives in B. That is a physical boundary, not a taste one, which is
+why it will hold as features are added.
+
+Secondary rule for the same reason, applied to eval:
+
+| | where | why |
+| --- | --- | --- |
+| eval **execution** — trial cursor, scoring while fresh | **A** | needs the loop and the devices |
+| eval **analysis** — checkpoint x trial grid, success rates, Q plots, campaign history | **B** | reads results only |
 
 Surfaces A and B stay separate deployments. They share the robot descriptor,
 the design tokens, and a generated TypeScript API client — not a monolith.
@@ -476,17 +591,147 @@ or two → Start*, with the long tail behind an "Advanced" disclosure. The chose
 preset plus the override diff is what gets recorded in the run's `meta.json`,
 which also buys reproducibility.
 
-### 6.6 What ties the three surfaces together
+### 6.6 Cameras: name the seam, keep it in-process
+
+There are **already four camera subscribers** — the policy, `video_recorder
+.write_frames()`, `recorder.add_frame()` and the MJPEG `/video_feed`. They
+happen to share one process. So the question is never "who is the second
+subscriber"; it is **what forces a process boundary.**
+
+| reason to split | applies here? |
+| --- | --- |
+| different languages | no — all Python |
+| different machines | no — one workstation |
+| different scheduling priority (realtime vs best-effort) | not yet |
+| **fault / lifecycle isolation** | **yes, eventually** |
+
+Only the last is real, and it is real: today Flask serves the UI *and* hosts the
+control-loop thread, so a dying UI takes the robot loop with it. The thing
+driving the arm should not depend on the health of the thing showing pictures.
+
+**But that specific case is already solved without a camera service**, because
+Rerun publishes *from* the camera-owning process to a separate viewer:
+
+```text
+control process  ──rr.connect_grpc()──▶  viewer process
+  (owns cameras)                          (crashes and restarts freely)
+```
+
+#### The decision
+
+Write the protocol now; keep the trivial implementation.
+
+```python
+class FrameBus(Protocol):
+    def latest(self) -> dict[str, np.ndarray]: ...   # control loop
+    def subscribe(self, cb) -> Subscription: ...     # everyone else
+```
+
+- **Now:** `InProcessFrameBus` wrapping `CameraManager`. Zero copies, zero added
+  latency — it is a pointer hand-off.
+- **Later:** a transport-backed implementation. **Consumers do not change.**
+
+Protocol costs an afternoon. The transport costs days and, built today, would
+*add* a serialise + copy + deserialise hop to the per-tick hot path for
+consumers that are all in one process. That is slower and more fragile in the
+name of being faster and more modular.
+
+Note `CameraManager` is already **one class in one file**, imported by both
+apps — there is no duplicated camera code to remove. The only open question was
+ever *which process constructs it*, and the answer is "the one that drives the
+robot".
+
+#### Build the frame service when any one of these trips
+
+1. A consumer must survive the control process restarting, or vice versa.
+2. A consumer is in another language or on another machine.
+3. Two things genuinely need cameras **concurrently** and cannot be one process.
+4. The control loop misses its deadline because of a subscriber's work.
+
+None is true today. (1) will arrive first, and Rerun already covers its most
+likely instance.
+
+#### If/when it is built: transport options
+
+**gRPC and zero-copy are mutually exclusive.** gRPC serialises protobuf to a
+socket — that is a copy by definition. Zero-copy means the consumer reads the
+same physical memory the producer wrote. Pick one; you cannot have both.
+
+For reference, the load is small: 2 cameras x 256x256x3 at 30 Hz is **~12 MB/s**.
+
+| option | verdict |
+| --- | --- |
+| **ZMQ PUB/SUB** | `pyzmq 27.1.0` **already installed** (agentlace uses it), idiom already known. The sane default. Copies, but 12 MB/s is nothing. |
+| **`multiprocessing.shared_memory` ring buffer** | Genuinely the best technical fit for same-machine image fan-out: true zero-copy, stdlib, no new dependency, ~100 lines. Underrated. |
+| **Zenoh 1.x** | The modern non-ROS robotics answer — shared-memory zero-copy, ~5 us latency, 67 Gbps peak. `eclipse-zenoh` 1.10.1 on PyPI. Verify the **Python** binding exposes SHM before committing; the zero-copy story lives in the Rust core. |
+| **gRPC** | Fine for *control-plane* calls and for Rerun (which uses it), wrong tool for a zero-copy image bus. |
+| **ROS 2 / DDS** | **No.** Beyond having no ROS, DDS zero-copy is implemented only for `rclcpp` — a Python stack gets none of the benefit while taking the whole dependency. |
+
+#### Transport for everything else: keep REST
+
+Measured per tick today:
+
+| call | cost | transport matters? |
+| --- | --- | --- |
+| `follower.get_state()` | 7 floats over HTTP, ~1 ms | no |
+| `cameras.get_all_latest()` | in-process | no |
+| RL forward (encoder + actor + 10 critics) | **1.38 ms** local GPU | no |
+| policy server | **once per 14 ticks** (chunked) | no longer the hot path |
+
+Images *were* the bottleneck at 55 ms/call, dominated by base64 + JSON parsing.
+That is already fixed with jpeg (15.2x smaller) and chunking (14x fewer calls).
+Adopting gRPC now would optimise a solved problem.
+
+The one transport change worth making is **WebSocket for state push to the
+browser** instead of polling — a UI responsiveness win, not a control-loop one.
+
+### 6.7 Deployment: containers for the file-readers, host process for the robot
+
+| component | containerise? |
+| --- | --- |
+| Data Browser + its FastAPI backend | **yes** — reads files, no devices, already has a Dockerfile and compose |
+| Policy server | **yes** — HTTP in, HTTP out |
+| **Robot console** | **no** |
+
+RealSense passthrough into a container means device nodes, udev rules, USB
+permissions and kernel-version coupling. Days of work, zero gain on a
+single-user workstation. Containers buy isolation, reproducibility and
+multi-tenancy; the reproducibility here comes from the uv lockfile, and the other
+two are not needed.
+
+A CLI launcher is the cheap ergonomic win instead: `resfit ui robot`,
+`resfit ui browse`, `resfit ui inspect <run>`. An afternoon, and it retires the
+"which port, which directory, which env var" tax permanently.
+
+### 6.8 Logging: one tap, two kinds of sink
+
+Rerun cannot be the archive (§4.3). So the tap fans out:
+
+```text
+loop tick
+   └─ tap.put(record)          non-blocking, background thread, bounded queue
+        ├─ ticks.parquet       ARCHIVE  - source of truth, pandas-readable
+        ├─ rl_obs.zarr         ARCHIVE  - exact model input, batch-readable
+        └─ rr.log(...)         VIEWER   - optional, live, regenerable
+```
+
+The rule: **archive in a format nobody owns; view in whatever is nicest this
+year.** The Rerun side is then genuinely disposable — if `.rrd` breaks,
+regenerate it from the archive and lose nothing.
+
+### 6.9 What ties the surfaces together
 
 Only three things, deliberately:
 
 1. **The robot descriptor** (§5.4) — one file per robot, served by A, consumed
-   by A, B and C.
-2. **The run record** — written by A, read by B and C.
+   by A and B.
+2. **The run record** — written by A, read by B (and by Rerun, regenerably).
 3. **A generated API client + shared design tokens** — so A and B look and feel
    like one system without being one codebase.
 
-No shared database, no message bus, no monorepo requirement.
+No shared database, no message bus, no monorepo requirement. Four protocols
+inside A — `Robot`, `Env`, `ActionSource`, `FrameBus` — each with one reason to
+change (§5A, §6.6).
 
 ---
 
@@ -498,12 +743,15 @@ Ordered so that every step is independently useful and nothing is a flag day.
 | --- | --- | --- |
 | **0** | **Run record + run_id** (deploy/eval plan §2–3) | every UI feature below needs runs to have identity |
 | **1** | Robot descriptor schema; write one for the Trossen station; serve it from the existing Flask app | pure addition, no UI change, immediately unblocks B |
-| **2** | Extract `ActionSource` protocol and the shared control loop **inside the current Flask apps**; keep both frontends | the risky refactor, done where it can be tested against hardware without a UI rewrite |
+| **1b** | Name the protocols: `ActionSource`, `FrameBus`, `InterventionTrigger`. Implement `InProcessFrameBus` + existing sources only | an afternoon; makes every later split a transport swap instead of a rewrite |
+| **2** | Extract the shared control loop **inside the current Flask apps** behind `ActionSource`; keep both frontends | the risky refactor, done where it can be tested against hardware without a UI rewrite |
 | **3** | Extract the duplicated endpoints into one FastAPI service behind the existing frontends | API consolidation, still no UI rewrite |
 | **4** | New React console for Surface A against that API; retire the two `static/` dirs | now a rewrite of ~1,480 lines of vanilla JS, not of the robot logic |
 | **5** | Visualizer: Runs section + eval campaign grid + Q plots | the payoff for phase 0 |
 | **6** | Replace visualizer robot sniffing with the descriptor; **offer upstream** | removes the worst hardcoding; may remove our fork divergence |
-| **7** | Rerun integration: live `connect_grpc()` during runs, `.rrd` generated from run records | last because it is additive and independent |
+| **7** | Rerun integration: live `connect_grpc()` during runs, `.rrd` generated from run records | last because it is additive and independent — and doubles as the first proof the publish pattern works across processes |
+| **8** | CLI launcher (`resfit ui robot` / `browse` / `inspect`) | cheap, do it whenever it annoys you enough |
+| **—** | Frame service with a real transport | **not scheduled.** Build when §6.6's decision rule trips, not before |
 
 Phases 1–3 are reversible and testable. Phase 4 is the only big-bang, and by
 then the robot logic is already behind an API.
@@ -531,6 +779,16 @@ assumptions from leaking back in.
 - **Not upgrading vendored LeRobot as part of this.** §5.3 — separate decision
   with its own risk.
 - **No WebRTC until MJPEG is measured to be the bottleneck.**
+- **No camera service, message bus or serialisation format yet.** §6.6 — one
+  machine, 12 MB/s, all consumers in one process. The failure mode to avoid is
+  not under-engineering; it is debugging your own middleware instead of the
+  insertion task.
+- **No gRPC for the image path.** It is a copy by definition, so it cannot be
+  the zero-copy answer, and the image hot path is already solved by jpeg +
+  chunking.
+- **Not containerising the robot console.** §6.7.
+- **Rerun is not the archive.** §4.3 — it has no read-back API in the installed
+  version.
 
 ---
 
@@ -557,12 +815,15 @@ missed?
 **Q4 — Fork LeLab, or build Surface A fresh?** It already does calibrate /
 teleoperate / record in FastAPI + React. Forking could save months but imports
 its abstractions, which may not fit a residual-RL eval workflow. Building fresh
-keeps the eval campaign system (§4.6, the one genuinely novel piece) at the
+keeps the eval campaign system (§4.7, the one genuinely novel piece) at the
 centre. Has anyone read LeLab's code closely enough to judge?
 
-**Q5 — Is three surfaces one too many?** Could Rerun's `serve_web_viewer()`
-absorb Surface C *and* chunks of B, leaving just a control panel and Rerun?
-What breaks — annotation editing, campaign grids, dataset writes?
+**Q5 — RESOLVED, but challenge it.** Rerun is demoted from a surface to an
+optional subscriber, because the installed SDK has no read-back API so it cannot
+be the archive (§4.3). Counter: newer versions add a dataframe API — is betting
+on that better than maintaining a parquet schema? I say no, on format-lifetime
+grounds for thesis data. Disagree if you think the maintenance cost of our own
+schema is higher than the version risk.
 
 **Q6 — Phase ordering.** Phase 0 (run record) gates everything and touches the
 training loop. Is it right to block UI work on it, or should Surfaces A/B
@@ -573,6 +834,23 @@ The §4 survey found no off-the-shelf answer for evaluation campaigns, which
 makes me suspect I am missing a term of art or a tool. Calibration wizards,
 safety interlocks, dataset quality gates, teleop latency monitors, policy A/B
 comparison — what else should be on the roadmap?
+
+**Q8 — Is deferring the frame service right?** §6.6 says name the protocol, keep
+it in-process, and gives four trigger conditions. The risk is that an
+in-process-only design quietly accretes assumptions (shared mutable frames,
+callbacks that block the loop) that make the later split harder than it looks.
+Is a protocol enough discipline, or does the cheap version have to be a real
+transport from day one to keep the seam honest?
+
+**Q9 — Fault isolation sooner?** Today a dying Flask takes the control loop with
+it, because Flask hosts the loop thread. Should splitting *that* (loop in its
+own process, UI as a client) come before any of the feature work — i.e. is it a
+phase 1 concern rather than an eventual one?
+
+**Q10 — Four protocols or too many?** `Robot`, `Env`, `ActionSource`,
+`FrameBus`. Each has a defensible single reason to change (§5A, §6.6), but four
+abstractions in a single-researcher codebase is also how projects become
+unreadable. Which, if any, should collapse?
 
 ---
 
@@ -594,6 +872,18 @@ comparison — what else should be on the roadmap?
 | `rerun-sdk 0.35.0` already installed | `importlib.metadata` |
 | Rerun logging: 0.79 ms/tick for 2 images + 9 scalars; ~15 MB per 350-step episode | measured in this venv |
 | Eight logging sinks across four roots, no shared run id | deploy/eval plan §2 |
+| `rerun-sdk 0.35.0` has **no** read-back API (`import rerun.dataframe` fails) | tested in this venv |
+| Rerun latest is 0.38.1 — installed copy is 3 minor versions behind | PyPI |
+| Follower arm is already behind an HTTP service; both apps are clients | `follower_single_server.py`, `FollowerClient` |
+| Cameras are RealSense, claimed per-process (`cfg.enable_device(serial)`) | `camera_manager.py:84` |
+| Four camera subscribers already exist, all in one process | `infer_loop.py` (policy, video_recorder, recorder, /video_feed) |
+| `CameraManager` is one class in one file, imported by both apps | no duplicated camera code |
+| Camera load is ~12 MB/s (2 x 256x256x3 @ 30 Hz) | arithmetic |
+| `pyzmq 27.1.0` already installed via agentlace | `importlib.metadata` |
+| `eclipse-zenoh` 1.10.1 available on PyPI, not installed | PyPI |
+| DDS zero-copy is `rclcpp`-only, so unavailable to a Python stack | [Agnocast paper](https://arxiv.org/pdf/2506.16882) |
+| `TrossenResidualEnv` is already gym-shaped (`spaces.Dict`, `spaces.Box`, `reset`, `step`) | `real_residual_env.py:183-252` |
+| Per-tick: follower ~1 ms, RL forward 1.38 ms, policy server once per 14 ticks | measured |
 
 ## Sources
 
@@ -604,3 +894,8 @@ comparison — what else should be on the roadmap?
 - [LeRobot v0.6.0 release notes](https://huggingface.co/blog/lerobot-release-v060)
 - [BEAVR: Bimanual, multi-Embodiment, Accessible VR Teleoperation](https://arxiv.org/html/2508.09606v1)
 - [Rerun](https://rerun.io)
+- [Intrinsic Core / intrinsic-ai/sdk](https://github.com/intrinsic-ai/sdk)
+- [Intrinsic open-sources core robotics capabilities, ROSCon 2026](https://www.unite.ai/intrinsic-open-sources-core-robotics-capabilities-at-roscon-2026/)
+- [Zenoh / ZettaScale — shared memory and zero-copy](https://www.therobotreport.com/zettascale-designs-zenoh-to-transcend-dds-for-automotive-ros-communications/)
+- [Zenoh performance thread, Open Robotics Discourse](https://discourse.openrobotics.org/t/zenoh-performance/30494)
+- [ROS 2 Agnocast — DDS zero-copy is rclcpp-only](https://arxiv.org/pdf/2506.16882)
