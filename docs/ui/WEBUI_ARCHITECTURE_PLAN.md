@@ -7,6 +7,38 @@ have this repo. Everything factual is stated with the file, line count or
 measurement it came from, so a reviewer can challenge the premises and not just
 the conclusions.
 
+## Review round 1 — what changed
+
+Reviewed by Gemini and GPT (reports alongside this file). Gemini concurred with
+the architecture and added little; GPT found a real gap and three overclaims.
+Changes made, each marked **Rn** at the point it applies:
+
+| id | change | source |
+| --- | --- | --- |
+| **R1** | Presets are **not** a safety boundary. Safety posture moved to §11's server-side guard + state machine | GPT |
+| **R2** | Dropped the claim that swapping to LeRobot's ABC is "a rename". Mirroring is not registry participation; needs contract tests | GPT |
+| **R3** | Camera bus: `lossless` is **detection, not prevention**; and a recorder fault must **not** raise into the control thread | GPT |
+| **R4** | `writeable=False` is a tripwire, not an ownership guarantee | GPT |
+| **R5** | Named the camera-bus items still unspecified (fan-out point, queue sizing, drain, overflow) and required fault-injection measurement | GPT |
+| **R6** | Robot descriptor split into **robot profile** + **station deployment**, with command-validating fields marked | GPT |
+| **R7** | §9 Q1 position changed: share mechanics, keep **explicit sessions** rather than one loop differentiated by preset | GPT |
+| **R8** | Bind the robot console to **loopback** by default — a command service is not a dashboard | GPT |
+| **R9** | **New §11 safety contract**, the plan's biggest gap. Includes an audit that found the BC inference path has **no per-tick joint clamp** | both |
+| **R10** | Phase order: §11 safety becomes 0a; run *identity* gates UI work, the full archive does not | both |
+
+The §11 audit produced the most actionable finding in the whole exercise, and it
+came from checking the code rather than from either report: the per-tick joint
+jump guard exists only in `teleop/control_loop.py`, so the inference and eval
+paths run with no arm-joint clamp below the Trossen SDK's deliberately-loose
+default. That is the probable cause of occasional observed jumps during
+inference. See §11.2.
+
+Not adopted: Gemini's "calibration wizard" and "diagnostics traffic light" were
+already in this document's own §9 Q7 list of suspected gaps, so they confirm
+rather than extend it. They are folded into §11.8 preflight instead.
+
+---
+
 ### If you are reviewing this
 
 **The questions I most want attacked are in §9** (Q1-Q10). The decisions I am
@@ -416,10 +448,17 @@ which is a research-schedule risk, not a refactor.
 
 **Therefore: mirror the interface, do not import it.** Define our own
 `Robot`-shaped protocol with the same member names and semantics, implement
-Trossen against it, and keep it close enough that a later swap to the real
-`lerobot.robots.Robot` is a rename plus deletion of our protocol — not a
-redesign. Where the name is already right (`connect`, `disconnect`,
-`is_connected`, `get_observation`, `send_action`), use it verbatim.
+Trossen against it, and keep it small. Where the name is already right
+(`connect`, `disconnect`, `is_connected`, `get_observation`, `send_action`), use
+it verbatim.
+
+> **Correction after review (R2).** An earlier draft said the eventual swap
+> would be "a rename plus deletion of our protocol". That overclaims.
+> Structural compatibility is **not** registry participation: mirroring the ABC
+> gives us none of LeRobot's `RobotConfig.register_subclass` plumbing or its
+> `lerobot_robot_*` entry-point discovery. Keep the local protocol deliberately
+> minimal, and prove compatibility with **contract tests** plus an adapter at
+> upgrade time rather than assuming a drop-in.
 
 This is the single most important judgement call in the document and I would
 like it challenged.
@@ -458,9 +497,27 @@ The visualizer's unit *guessing* (`>360` → ticks) becomes a declared `unit`.
 `G1_SDK_TO_URDF` becomes that robot's `column_to_joint`. `hasURDFSupport()`
 becomes "does the descriptor have a `urdf` block".
 
-**This descriptor is generic enough to be worth upstreaming** to
+> **Correction after review (R6): that is two records, not one.** The example
+> above conflates facts with different lifetimes:
+>
+> | | changes when | example |
+> | --- | --- | --- |
+> | **robot profile** | you buy a different robot model | joint names, DoF, URDF, embodiment, column→joint map |
+> | **station deployment** | you re-cable, re-calibrate, move the rig | camera serials, calibration id, locally enforced joint limits, leader IP, follower URL |
+>
+> Mixing them means a re-calibration looks like a new robot. Split them:
+> `robots/trossen_single_arm.yaml` (profile) and
+> `stations/station3.yaml` (deployment, referencing a profile).
+>
+> And the sharper point: **mark which fields are command-validating.** Joint
+> limits used by §11's guard are safety-critical and must be read by the
+> backend, never supplied by the browser. Display names and chart groupings are
+> presentation-only. A single undifferentiated descriptor invites the UI to
+> send limits it should only be rendering.
+
+**The profile half is generic enough to be worth upstreaming** to
 lerobot-dataset-visualizer, which would retire our fork's divergence on the
-robot-registry question entirely.
+robot-registry question entirely. The station half is ours and stays local.
 
 ---
 
@@ -624,6 +681,13 @@ Additions:
 
 ### 6.5 Config: schema + presets, which is the answer to the checkbox wall
 
+> **Correction after review (R1).** An earlier draft claimed presets could
+> preserve the different *safety postures* of teleop, inference and eval. That
+> was wrong: **presets are configuration, not an enforcement boundary.** A
+> preset can be overridden by the next request; a state machine cannot. Safety
+> posture belongs in §11's server-side guard and session state machine. Presets
+> remain the right answer to the *checkbox* problem only.
+
 One Pydantic model tree per surface, with a `validate()` that returns
 structured errors **and** the dependency rules, e.g.:
 
@@ -699,10 +763,28 @@ cam1 thread ─┼─▶ CameraBus
    bus.subscribe(mode="stream", lossless=True)      # a drop is an ERROR
    ```
 
-   For `lossless=True`, a full queue means the recorder cannot keep up. You
-   cannot make the disk faster, but you **can** refuse to pretend the episode is
-   clean: raise, mark the episode failed, stop recording. A corrupt dataset
-   discovered six weeks into training costs far more than an aborted episode.
+   For `lossless=True`, a full queue means the recorder cannot keep up.
+
+   > **Correction after review (R3).** Two errors in the earlier draft.
+   >
+   > **(a) This is detection, not prevention.** A bounded queue cannot *make*
+   > recording lossless when the disk or encoder is slower than capture. The
+   > contract is "you will be told, unmistakably", not "no frame is ever lost".
+   > Stated honestly: you cannot make the disk faster; you can only refuse to
+   > lie about it.
+   >
+   > **(b) The failure must not reach the control thread.** The earlier draft
+   > said "raise". If that exception propagates into the control loop, a slow
+   > disk now halts a moving arm — a new failure mode introduced while fixing a
+   > latency one. The recorder's fault is raised **on the recorder's own
+   > thread**, sets a sticky `recording_invalid` flag, and is surfaced to the
+   > operator and the run record. Whether it also stops motion is a **§11
+   > decision**, taken deliberately, not an accident of exception propagation.
+
+   Default behaviour: mark the episode invalid and keep the arm under control.
+   The operator decides whether to abort. A corrupt dataset discovered six weeks
+   into training costs far more than a re-run trial — so the signal must be
+   impossible to miss, which is not the same as stopping the robot.
 
 4. **Work happens on the subscriber's thread.** The bus hands off a reference;
    the recorder's own thread encodes and writes. This is what gets encode off
@@ -712,7 +794,9 @@ cam1 thread ─┼─▶ CameraBus
    never mutated in place — `read()` ends in `cv2.cvtColor`/`resize`, which
    allocate, and the producer does `self._latest[name] = frame`, a rebind. So
    every subscriber can share one reference with `writeable=False` set to make
-   the invariant enforced rather than conventional. Anyone who genuinely needs
+   accidental mutation loud. (**R4:** a read-only flag is a *convention with a
+   tripwire*, not an ownership guarantee — any consumer can flip it back. It
+   catches mistakes; it does not prevent malice or determined cleverness.) Anyone who genuinely needs
    to mutate copies for themselves. (Today `get_latest_frame` does
    `frame.copy()` per reader while holding the camera's lock — guarding a hazard
    that does not exist, and blocking the producer for the duration.)
@@ -776,6 +860,22 @@ become columns:
 | was a camera stalled? | repeated `seq` |
 | were the cameras synced? | `skew_ms` |
 | did encode steal control budget? | it cannot any more, by construction |
+
+#### Still to specify before coding (R5)
+
+The sketch above does not yet pin down, and a prototype must:
+
+| open item | why it matters |
+| --- | --- |
+| **the fan-out point** — if the producer-facing path is a latest slot, how does *every* frame reach the recorder? | the two modes must be fed from the same capture, not from the latest slot |
+| **queue capacity** per subscriber, derived from measured worst-case consumer latency | an arbitrary `maxsize` is a guess that fails under load |
+| **shutdown / drain** semantics | the recorder must flush before an episode is marked complete |
+| **behaviour when a recorder queue fills** | §R3(b) — mark invalid, do not throw into control |
+
+And it must be **measured under fault injection**: deliberately slowed disk and
+slowed encoder, recording control-loop jitter, queue depth and drop counts. The
+claim "this gets encode off the control path" is currently an argument, not a
+measurement.
 
 #### Size
 
@@ -891,7 +991,8 @@ Ordered so that every step is independently useful and nothing is a flag day.
 
 | phase | work | why here |
 | --- | --- | --- |
-| **0** | **Run record + run_id** (deploy/eval plan §2–3) | every UI feature below needs runs to have identity |
+| **0a** | **§11 safety contract**: command guard server-side, state machine, authority, failure table, follower watchdog. Tested against mocks | **gates all hardware work.** The §11.2 audit found the BC inference path has no per-tick joint clamp at all |
+| **0b** | **run_id + a minimal versioned run manifest** — not the full Parquet/Zarr pipeline | both reviewers: establish identity early, but do **not** block console work on the complete archive. Use mock runs until the record contract stabilises |
 | **1** | Robot descriptor schema; write one for the Trossen station; serve it from the existing Flask app | pure addition, no UI change, immediately unblocks B |
 | **1b** | Protocols: `ActionSource`, `FrameBus`, `InterventionTrigger`; `Frame`/`FrameSet` with `seq` + `t_capture` | an afternoon; every later split becomes a transport swap, and frames finally have identity (§3.4) |
 | **1c** | **Build the in-process camera bus** (§6.6): latest-value + lossless-stream modes, per-subscriber queues, grouper, subscriber threads, drop/depth/skew metrics | gets PyAV encode and dataset writes **off the control thread** — fixes a present latency hazard, not a hypothetical one. ~150-200 lines, stdlib only |
@@ -906,6 +1007,11 @@ Ordered so that every step is independently useful and nothing is a flag day.
 
 Phases 1–3 are reversible and testable. Phase 4 is the only big-bang, and by
 then the robot logic is already behind an API.
+
+**Changed after review:** the original phase 0 made the full run-record pipeline
+a hard gate on everything. Both reviewers pushed back and they were right — run
+*identity* is the gate, the full archive is not. Meanwhile safety moved from
+absent to phase 0a, ahead of every UI task.
 
 ### Do a second robot as the test
 
@@ -946,11 +1052,23 @@ assumptions from leaking back in.
 
 ## 9. Questions I want reviewers to attack
 
-**Q1 — Is merging teleop and inference right?** §3.1 and §6.2 argue they are
-one loop with different action sources, and the code already switches sources
-at runtime. Counter-argument: teleop is a *data collection* tool with different
-users, failure modes and safety posture than an *evaluation* tool, and merging
-couples two things that change for different reasons. Which risk is worse?
+**Q1 — REVISED (R7). Position changed after review.** The earlier draft argued
+for one loop with differences living in presets. That was wrong in one specific
+way: presets are not an enforcement boundary (§6.5 R1), so "same loop, different
+preset" would have hidden consequential safety behaviour.
+
+New position: **share the mechanics, keep the sessions explicit.** One control
+loop, one `FrameBus`, one recorder, one API — but distinct `TeleopSession`,
+`PolicySession` and `EvaluationSession` types with their own lifecycles,
+recording policies and failure responses, over a server-side state machine with
+one explicit command authority at a time (§11.4).
+
+The physical argument for *one process* is unchanged and unaffected: RealSense
+cameras are claimed per-process, and intervention needs the leader arm alongside
+the policy. One process, several sessions.
+
+Still worth attacking: is "one process, explicit sessions" a stable resting
+point, or does it drift back into a monolith once a fourth session type appears?
 
 **Q2 — Mirror LeRobot's `Robot` interface, or bite the version upgrade?**
 §5.3. Mirroring risks a permanent near-miss that never converges. Upgrading
@@ -1047,6 +1165,151 @@ unreadable. Which, if any, should collapse?
 | DDS zero-copy is `rclcpp`-only, so unavailable to a Python stack | [Agnocast paper](https://arxiv.org/pdf/2506.16882) |
 | `TrossenResidualEnv` is already gym-shaped (`spaces.Dict`, `spaces.Box`, `reset`, `step`) | `real_residual_env.py:183-252` |
 | Per-tick: follower ~1 ms, RL forward 1.38 ms, policy server once per 14 ticks | measured |
+
+---
+
+## 11. Safety contract — the plan's biggest gap
+
+Added after review. Both reviewers flagged that the plan described good software
+boundaries without defining robot-control behaviour; GPT's report was specific
+about it and correct. This section is the gate: **no new console touches
+hardware until this is written, implemented and tested against mocks.**
+
+### 11.1 What already exists — audited, not assumed
+
+| guard | value | enforced where | covers |
+| --- | --- | --- | --- |
+| EE bounds box | `EEBounds.xyz_min/max` | **server-side**, `follower_single.py:177` | EE-pose commands only |
+| gripper clip | `[gripper_closed, gripper_open]` | **server-side**, `follower_single.py:234,320` | gripper, every path |
+| absolute-mode speed cap | `absolute_mode_max_speed_m_s = 0.3` | server-side goal-time stretch | absolute EE moves |
+| per-tick joint jump clamp | `joint_max_relative_target = 0.5` rad | **client-side**, `teleop/control_loop.py:282` | **teleop only** |
+
+### 11.2 The gap this audit found
+
+**The BC inference path has no per-tick joint jump clamp at all.**
+
+- `infer_loop.py` — no `joint_max_relative_target`, no `np.clip` on the arm.
+- `reconstruct_absolute_action()` clips **only** the gripper.
+- `follower_single.move_to_joint_positions()` clips **only** the gripper; its
+  docstring says outright: *"The caller is responsible for any safety clamp on
+  the 6 arm joints themselves (see `control_loop.py`'s
+  `joint_max_relative_target`)"*.
+
+So on the inference/eval path the only backstop is the Trossen SDK's own
+`max_relative_target`, which this repo's own config comment describes as
+"deliberately loose" (their default 5.0 rad). **This is the most likely cause of
+the occasional "robot jumps" observed during inference**, and it is a concrete
+instance of GPT's abstract point: *which limits are validated server-side on
+every command?* Today, for arm joints: none.
+
+Note the residual RL path is bounded differently and more safely by
+construction — `clamp(base + residual, -1, 1)` in a delta action space, then
+`action_scaler.unscale()` into dataset-derived limits. The hole is specific to
+the BC inference path.
+
+### 11.3 Command guard — move the clamp below the apps
+
+The clamp belongs **server-side, on every command, for every caller**, not in
+one client's loop:
+
+```text
+any client ──▶ follower server ──▶ CommandGuard ──▶ hardware
+                                     ├─ per-tick per-joint delta clamp (vs the
+                                     │  follower's OWN measured position)
+                                     ├─ absolute joint limits from the station
+                                     │  deployment record (§5.4, R6)
+                                     ├─ EE bounds (already there)
+                                     ├─ gripper clip (already there)
+                                     └─ reject + log + report on violation
+```
+
+Two properties that matter:
+
+1. **It cannot be bypassed by a buggy client**, which is the whole point of
+   moving it. A new console, a script, or a half-finished experiment all get the
+   same guard.
+2. **Violations are reported, not silently clipped.** A clipped command means a
+   policy asked for something unsafe — that belongs in the run record and on the
+   operator's screen, because silently clipping hides exactly the behaviour you
+   want to know about during RL.
+
+This is the single highest-value change in the whole plan, and it is small.
+
+### 11.4 Operating states and command authority
+
+Presets cannot do this (§6.5 R1). An explicit state machine, server-side:
+
+```text
+DISCONNECTED ─▶ CONNECTED ─▶ READY ─▶ RUNNING ─▶ STOPPING ─▶ READY
+                                 └──────▶ FAULTED ─(ack)─▶ READY
+```
+
+- Transitions are server-side and validated; the browser *requests*, it does not
+  *set*.
+- `RUNNING` carries exactly one **command authority** at a time:
+  `TELEOP | POLICY | POLICY_WITH_INTERVENTION | RESET`.
+- Authority handover (pedal pressed, pedal released) is an explicit, logged
+  transition — not an `if` inside the loop.
+- The active authority is **continuously visible** to the operator.
+
+Separate session types rather than one loop differentiated by config —
+`TeleopSession`, `PolicySession`, `EvaluationSession` — sharing mechanics but
+owning their own lifecycle, recording policy and failure response. This is a
+change of position; see R7 under §9 Q1.
+
+### 11.5 Failure responses — one table, decided in advance
+
+Every row needs a decided answer before hardware. Proposed defaults:
+
+| fault | detection | response |
+| --- | --- | --- |
+| stale camera frames | `FrameSet.age_ms` > threshold, or repeated `seq` | leave `RUNNING` → `FAULTED`, hold position, no new commands |
+| camera stalled entirely | no new `seq` for N ticks | `FAULTED`, hold |
+| policy server timeout | request timeout | `FAULTED`, hold (never extrapolate a stale action) |
+| leader/pedal lost mid-intervention | device read fails | `FAULTED`, hold — **do not** silently hand authority back to the policy |
+| browser disconnects | WebSocket close | `RUNNING` continues; UI-independent by design. A dead browser must not move or stop the arm |
+| API process dies | follower-side command timeout | **follower server watchdog**: no command within N ms → hold last position |
+| follower server unreachable | client-side | `FAULTED`; the arm is already held by its own controller |
+| recorder queue full | §6.6 R3 | mark `recording_invalid`, keep arm under control, surface loudly |
+| control loop misses deadline | measured tick time | log; after k consecutive misses, `FAULTED` |
+
+**Hold, not stop, is the default** for a 7-DoF arm mid-task: cutting torque
+drops the arm. "Stop" means "stop issuing new targets and hold the current one".
+
+### 11.6 What must stay independent of all of this
+
+- **The physical e-stop.** Never mediated by software, never by the browser.
+- **The follower-side watchdog.** Must hold position if the Python process
+  hangs, with no cooperation from it. This is the one guarantee that survives
+  every software bug above.
+
+If only two things from §11 get built, build these two.
+
+### 11.7 Network posture (R8)
+
+§8 lists "no auth, trusted LAN" as a non-goal. That is fine for a dashboard and
+wrong for a **command** service: any local or LAN client, or a
+browser-originated request from an unrelated page, could issue a motion command.
+
+**Bind the robot console to loopback by default.** If LAN access is genuinely
+needed, add an explicit origin/access policy rather than relying on network
+trust. One config line; real risk reduction.
+
+### 11.8 How this is tested
+
+Against mocks, before hardware — this is what the mock follower and synthetic
+camera feeds are *for*:
+
+1. every §11.5 row, with the fault injected deliberately
+2. authority handover under a flapping pedal
+3. command guard rejects an out-of-limit command from every entry point
+4. watchdog holds when the client is `SIGSTOP`ped mid-run
+5. state machine refuses illegal transitions
+6. recorder-queue-full marks invalid **without** interrupting control
+
+---
+
+---
 
 ## Sources
 
