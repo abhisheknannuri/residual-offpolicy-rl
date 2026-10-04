@@ -7,10 +7,29 @@ have this repo. Everything factual is stated with the file, line count or
 measurement it came from, so a reviewer can challenge the premises and not just
 the conclusions.
 
-**Reviewers: the questions I most want attacked are in §9.** The two decisions
-I am least sure about are (a) merging teleop and inference into one app, and
-(b) how far to go toward LeRobot's robot abstraction given the version pin in
-§5.3.
+### If you are reviewing this
+
+**The questions I most want attacked are in §9** (Q1-Q10). The decisions I am
+least confident about, in order:
+
+1. **Merging teleop and inference into one app** (§3.1, §6.2) — the argument is
+   that they are one control loop with different action sources, and that camera
+   exclusivity means they can never run concurrently anyway. Q1.
+2. **Mirroring LeRobot's `Robot` interface rather than importing it** (§5.3) —
+   forced by a version pin that is load-bearing for existing checkpoints. Risks
+   a permanent near-miss. Q2.
+3. **Where the camera bus stops** (§6.6) — a real in-process bus now,
+   cross-process deferred behind a stated decision rule. Over- or under-built?
+   Q8.
+
+Context that constrains any proposal: **one researcher, one robot, one
+workstation.** Solutions needing a team to operate are the wrong answer here,
+however good they are in general. Non-goals are listed explicitly in §8 —
+please argue with them rather than assuming they were overlooked.
+
+Facts are separated from proposals throughout: §2-§4 and §10 are measured or
+cited; §5-§7 are proposals. If a premise in the first group is wrong, most of
+the second group changes.
 
 ---
 
@@ -182,7 +201,41 @@ That last one is the clearest evidence of the problem: three robots in, and the
 mechanism is already string sniffing plus a per-robot lookup table pasted into a
 React component. A fourth robot makes it worse, not linearly.
 
-### 3.4 Eight logging sinks, four roots, no shared run id
+### 3.4 Encode and disk I/O run on the control thread
+
+In `infer_app/infer_loop.py`, inside the per-tick loop:
+
+```python
+images = self.cameras.get_all_latest()
+if video_recorder is not None:
+    video_recorder.write_frames(images)      # PyAV encode, inline
+...
+if recorder is not None:
+    recorder.add_frame(...)                  # LeRobot dataset write, inline
+```
+
+So video encoding and dataset writes happen **inside the 50 ms tick budget**. A
+disk hiccup or a slow encode steals directly from control. This is a real,
+already-present latency hazard, visible in `achieved_hz`, and it is the reason
+the frame bus in §6.6 is a deliverable rather than a tidy-up.
+
+It also means frames currently have **no identity**: `get_all_latest()` returns
+bare `dict[str, np.ndarray]` with no capture time and no sequence number.
+`_last_frame_time` exists but is used only by `health()`, never handed to a
+consumer. Consequences:
+
+| question | answerable today? |
+| --- | --- |
+| is this frame fresh, or has the camera stalled? | **no** — `_latest` keeps serving the last real frame indefinitely |
+| did I drop frames since my last read? | no |
+| are the two wrist cameras from the same moment, or 50 ms apart? | **no** |
+| for a recorded episode, when was each frame actually captured? | no |
+
+The second-to-last matters for the residual policy specifically: it consumes two
+wrist cameras and implicitly assumes they are synchronised. If one hiccups, the
+policy acts on a stale view and the failure gets attributed to the policy.
+
+### 3.5 Eight logging sinks, four roots, no shared run id
 
 Covered in detail in
 [`docs/real/RESIDUAL_RL_DEPLOY_AND_EVAL_PLAN.md`](../real/RESIDUAL_RL_DEPLOY_AND_EVAL_PLAN.md)
@@ -591,81 +644,178 @@ or two → Start*, with the long tail behind an "Advanced" disclosure. The chose
 preset plus the override diff is what gets recorded in the run's `meta.json`,
 which also buys reproducibility.
 
-### 6.6 Cameras: name the seam, keep it in-process
+### 6.6 The camera bus — one producer per camera, many consumers
 
-There are **already four camera subscribers** — the policy, `video_recorder
-.write_frames()`, `recorder.add_frame()` and the MJPEG `/video_feed`. They
-happen to share one process. So the question is never "who is the second
-subscriber"; it is **what forces a process boundary.**
+**Build this.** Not a seam-naming exercise: §3.4 shows encode and disk writes
+currently run on the control thread, inside the 50 ms tick budget.
 
-| reason to split | applies here? |
-| --- | --- |
-| different languages | no — all Python |
-| different machines | no — one workstation |
-| different scheduling priority (realtime vs best-effort) | not yet |
-| **fault / lifecycle isolation** | **yes, eventually** |
+#### Consumers are two different species
 
-Only the last is real, and it is real: today Flask serves the UI *and* hosts the
-control-loop thread, so a dying UI takes the robot loop with it. The thing
-driving the arm should not depend on the health of the thing showing pictures.
+| consumer | wants | behind? | work per frame |
+| --- | --- | --- | --- |
+| control loop | **latest only** | dropping old is *correct* | fast |
+| web UI | latest, ~10 fps | drop fine | jpeg encode |
+| Rerun | latest, subsampled | drop fine | cheap |
+| **dataset recorder** | **every frame, in order** | drop = **corrupt dataset** | disk write, slow |
+| **video saver** | every frame, in order | drop = gap in the video | encode, slow |
 
-**But that specific case is already solved without a camera service**, because
-Rerun publishes *from* the camera-owning process to a separate viewer:
+One `queue.Queue` fan-out cannot serve both, and the failure mode is nasty: a
+slow consumer either **blocks the producer** (camera thread stalls, control loop
+starves) or **silently drops** (a dataset with holes you never learn about).
+
+This split is not invented here — DDS and Zenoh formalise it as *History QoS*:
+`KEEP_LAST(depth=1)` versus `KEEP_ALL`. Both modes are needed.
+
+#### Shape
 
 ```text
-control process  ──rr.connect_grpc()──▶  viewer process
-  (owns cameras)                          (crashes and restarts freely)
+cam0 thread ─┐
+cam1 thread ─┼─▶ CameraBus
+             │     │
+             │     ├── latest slot per camera   (seq, overwritten, no queue)
+             │     │        └─▶ Grouper ──▶ FrameSet{frames, skew_ms, age_ms}
+             │     │                 ├─▶ control loop   (pull: latest())
+             │     │                 ├─▶ web UI thread  (pull: latest(), 10 Hz)
+             │     │                 └─▶ Rerun thread   (pull: latest(), subsampled)
+             │     │
+             │     └── per-subscriber bounded queue   (one queue EACH, not shared)
+             │              ├─▶ recorder thread    lossless=True
+             │              └─▶ video thread       lossless=True
 ```
 
-#### The decision
+#### Five rules that make it correct
 
-Write the protocol now; keep the trivial implementation.
+1. **Per-subscriber queues, never shared.** A shared queue means one consumer
+   *steals* items from another. Each stream subscriber gets its own
+   `queue.Queue(maxsize=N)`.
+
+2. **The producer never blocks.** A full queue must not stall a camera thread,
+   because that starves the control loop. Publish and move on, always.
+
+3. **Each subscriber declares its contract, and drops are loud.**
+
+   ```python
+   bus.subscribe(mode="latest")                     # drops are normal
+   bus.subscribe(mode="stream", lossless=True)      # a drop is an ERROR
+   ```
+
+   For `lossless=True`, a full queue means the recorder cannot keep up. You
+   cannot make the disk faster, but you **can** refuse to pretend the episode is
+   clean: raise, mark the episode failed, stop recording. A corrupt dataset
+   discovered six weeks into training costs far more than an aborted episode.
+
+4. **Work happens on the subscriber's thread.** The bus hands off a reference;
+   the recorder's own thread encodes and writes. This is what gets encode off
+   the control path, which is the entire point.
+
+5. **Publish references, not copies.** Frames are freshly allocated per read and
+   never mutated in place — `read()` ends in `cv2.cvtColor`/`resize`, which
+   allocate, and the producer does `self._latest[name] = frame`, a rebind. So
+   every subscriber can share one reference with `writeable=False` set to make
+   the invariant enforced rather than conventional. Anyone who genuinely needs
+   to mutate copies for themselves. (Today `get_latest_frame` does
+   `frame.copy()` per reader while holding the camera's lock — guarding a hazard
+   that does not exist, and blocking the producer for the duration.)
+
+#### Frames need identity
 
 ```python
-class FrameBus(Protocol):
-    def latest(self) -> dict[str, np.ndarray]: ...   # control loop
-    def subscribe(self, cb) -> Subscription: ...     # everyone else
+@dataclass(frozen=True)
+class Frame:
+    data: np.ndarray      # writeable=False, not copied
+    camera: str
+    seq: int              # monotonic per camera; a repeat means a stall
+    t_capture: float      # perf_counter at driver read
+
+@dataclass(frozen=True)
+class FrameSet:
+    frames: dict[str, Frame]
+    skew_ms: float        # max - min t_capture across cameras
+    age_ms: float         # now - oldest t_capture
 ```
 
-- **Now:** `InProcessFrameBus` wrapping `CameraManager`. Zero copies, zero added
-  latency — it is a pointer hand-off.
-- **Later:** a transport-backed implementation. **Consumers do not change.**
+This is what fixes §3.4's unanswerable questions, and it lets consumers be
+strict instead of hopeful:
 
-Protocol costs an afternoon. The transport costs days and, built today, would
-*add* a serialise + copy + deserialise hop to the per-tick hot path for
-consumers that are all in one process. That is slower and more fragile in the
-name of being faster and more modular.
+- control loop: `if fs.age_ms > 100: abort` — refuse to drive the arm from a
+  frozen view rather than silently acting on it
+- recorder: log `seq` and `t_capture` per frame, so a dataset is auditable and
+  `seq` gaps *prove* drops
+- run record: `skew_ms` as a per-tick column, so "were the cameras synced during
+  that run" is a query, not a hope
+- health: a repeating `seq` is a precise stall signal, better than a
+  time-since-last heuristic
 
-Note `CameraManager` is already **one class in one file**, imported by both
-apps — there is no duplicated camera code to remove. The only open question was
-ever *which process constructs it*, and the answer is "the one that drives the
-robot".
+#### Grouping: one stage, and it never waits
 
-#### Build the frame service when any one of these trips
+The **Grouper** is a latest-value subscriber to every camera and a producer of
+`FrameSet`. It lives there, not in each consumer, because the control loop and
+the recorder both need grouped, skew-checked sets.
+
+It must **never wait** for a slow camera — waiting makes tick latency equal to
+the worst camera's latency. Take latest-of-each, compute `skew_ms`, publish, and
+let the skew number reveal whether synchronisation is actually a problem.
+
+#### Threads are the right tool here
+
+The usual objection is the GIL. It does not bite: the expensive operations
+**release it** — PyAV/cv2 encode, disk I/O, and torch forward passes all do. So
+thread-per-consumer gives real parallelism for this workload and
+`multiprocessing` is unnecessary. The GIL would only matter if the heavy work
+were pure-Python loops.
+
+#### Observability, because an opaque bus is worse than none
+
+Every subscriber exposes queue depth, drop count, last-processed `seq`, and
+processing time p50/p95 — all into the run record. The questions that matter
+become columns:
+
+| question | answer |
+| --- | --- |
+| did the recorder keep up? | `drops == 0` |
+| was a camera stalled? | repeated `seq` |
+| were the cameras synced? | `skew_ms` |
+| did encode steal control budget? | it cannot any more, by construction |
+
+#### Size
+
+~150-200 lines, **stdlib only** (`threading`, `queue`). Do not pull in a
+framework: ZMQ, Zenoh and DDS all solve the *cross-process* version of this
+problem, and this is one process.
+
+#### Cross-process: still deferred
+
+The same `FrameBus` protocol is what a cross-process implementation would
+satisfy later, so building the in-process bus does not foreclose it. But it stays
+deferred, and the decision rule is unchanged.
+
+Build a cross-process frame service when **any one** of these trips:
 
 1. A consumer must survive the control process restarting, or vice versa.
 2. A consumer is in another language or on another machine.
 3. Two things genuinely need cameras **concurrently** and cannot be one process.
-4. The control loop misses its deadline because of a subscriber's work.
+4. The control loop misses its deadline because of a subscriber's work — which
+   the in-process bus above already fixes.
 
-None is true today. (1) will arrive first, and Rerun already covers its most
-likely instance.
+None is true today. (1) arrives first, and Rerun already covers its most likely
+instance by publishing from the camera-owning process to a viewer that can crash
+and restart freely.
 
-#### If/when it is built: transport options
+#### If it is ever built: transport options
 
 **gRPC and zero-copy are mutually exclusive.** gRPC serialises protobuf to a
-socket — that is a copy by definition. Zero-copy means the consumer reads the
-same physical memory the producer wrote. Pick one; you cannot have both.
+socket — a copy by definition. Zero-copy means the consumer reads the same
+physical memory the producer wrote. Pick one.
 
-For reference, the load is small: 2 cameras x 256x256x3 at 30 Hz is **~12 MB/s**.
+For reference the load is small: 2 cameras x 256x256x3 at 30 Hz is ~12 MB/s.
 
 | option | verdict |
 | --- | --- |
-| **ZMQ PUB/SUB** | `pyzmq 27.1.0` **already installed** (agentlace uses it), idiom already known. The sane default. Copies, but 12 MB/s is nothing. |
-| **`multiprocessing.shared_memory` ring buffer** | Genuinely the best technical fit for same-machine image fan-out: true zero-copy, stdlib, no new dependency, ~100 lines. Underrated. |
+| **ZMQ PUB/SUB** | `pyzmq 27.1.0` **already installed** (agentlace uses it); idiom already known. Sane default. Copies, but 12 MB/s is nothing. |
+| **`multiprocessing.shared_memory` ring buffer** | Best technical fit for same-machine image fan-out: true zero-copy, stdlib, no new dependency. Needs a ring of N slots plus per-slot sequence numbers (the seqlock pattern) so a reader can detect that a slot was overwritten mid-read. At 20 Hz with 8 slots the writer revisits a slot every 400 ms while a 400 KB read takes ~40 us — a ~10,000x margin, so torn reads are a theoretical rather than practical concern. |
 | **Zenoh 1.x** | The modern non-ROS robotics answer — shared-memory zero-copy, ~5 us latency, 67 Gbps peak. `eclipse-zenoh` 1.10.1 on PyPI. Verify the **Python** binding exposes SHM before committing; the zero-copy story lives in the Rust core. |
-| **gRPC** | Fine for *control-plane* calls and for Rerun (which uses it), wrong tool for a zero-copy image bus. |
-| **ROS 2 / DDS** | **No.** Beyond having no ROS, DDS zero-copy is implemented only for `rclcpp` — a Python stack gets none of the benefit while taking the whole dependency. |
+| **gRPC** | Fine for control-plane calls and for Rerun (which uses it); wrong tool for a zero-copy image bus. |
+| **ROS 2 / DDS** | **No.** Beyond having no ROS, DDS zero-copy is implemented only for `rclcpp`, so a Python stack gets none of the benefit while taking the whole dependency. |
 
 #### Transport for everything else: keep REST
 
@@ -678,9 +828,9 @@ Measured per tick today:
 | RL forward (encoder + actor + 10 critics) | **1.38 ms** local GPU | no |
 | policy server | **once per 14 ticks** (chunked) | no longer the hot path |
 
-Images *were* the bottleneck at 55 ms/call, dominated by base64 + JSON parsing.
-That is already fixed with jpeg (15.2x smaller) and chunking (14x fewer calls).
-Adopting gRPC now would optimise a solved problem.
+Images *were* the bottleneck at 55 ms/call, dominated by base64 + JSON parsing,
+and that is already fixed with jpeg (15.2x smaller) and chunking (14x fewer
+calls). Adopting gRPC now would optimise a solved problem.
 
 The one transport change worth making is **WebSocket for state push to the
 browser** instead of polling — a UI responsiveness win, not a control-loop one.
@@ -743,7 +893,8 @@ Ordered so that every step is independently useful and nothing is a flag day.
 | --- | --- | --- |
 | **0** | **Run record + run_id** (deploy/eval plan §2–3) | every UI feature below needs runs to have identity |
 | **1** | Robot descriptor schema; write one for the Trossen station; serve it from the existing Flask app | pure addition, no UI change, immediately unblocks B |
-| **1b** | Name the protocols: `ActionSource`, `FrameBus`, `InterventionTrigger`. Implement `InProcessFrameBus` + existing sources only | an afternoon; makes every later split a transport swap instead of a rewrite |
+| **1b** | Protocols: `ActionSource`, `FrameBus`, `InterventionTrigger`; `Frame`/`FrameSet` with `seq` + `t_capture` | an afternoon; every later split becomes a transport swap, and frames finally have identity (§3.4) |
+| **1c** | **Build the in-process camera bus** (§6.6): latest-value + lossless-stream modes, per-subscriber queues, grouper, subscriber threads, drop/depth/skew metrics | gets PyAV encode and dataset writes **off the control thread** — fixes a present latency hazard, not a hypothetical one. ~150-200 lines, stdlib only |
 | **2** | Extract the shared control loop **inside the current Flask apps** behind `ActionSource`; keep both frontends | the risky refactor, done where it can be tested against hardware without a UI rewrite |
 | **3** | Extract the duplicated endpoints into one FastAPI service behind the existing frontends | API consolidation, still no UI rewrite |
 | **4** | New React console for Surface A against that API; retire the two `static/` dirs | now a rewrite of ~1,480 lines of vanilla JS, not of the robot logic |
@@ -779,10 +930,11 @@ assumptions from leaking back in.
 - **Not upgrading vendored LeRobot as part of this.** §5.3 — separate decision
   with its own risk.
 - **No WebRTC until MJPEG is measured to be the bottleneck.**
-- **No camera service, message bus or serialisation format yet.** §6.6 — one
-  machine, 12 MB/s, all consumers in one process. The failure mode to avoid is
-  not under-engineering; it is debugging your own middleware instead of the
-  insertion task.
+- **No *cross-process* camera service, no serialisation format, no middleware
+  dependency.** §6.6 — one machine, 12 MB/s. The in-process bus *is* being built
+  (phase 1c) because it fixes §3.4; what stays deferred is the transport. The
+  failure mode to avoid is not under-engineering, it is debugging your own
+  middleware instead of the insertion task.
 - **No gRPC for the image path.** It is a copy by definition, so it cannot be
   the zero-copy answer, and the image hot path is already solved by jpeg +
   chunking.
@@ -835,12 +987,18 @@ makes me suspect I am missing a term of art or a tool. Calibration wizards,
 safety interlocks, dataset quality gates, teleop latency monitors, policy A/B
 comparison — what else should be on the roadmap?
 
-**Q8 — Is deferring the frame service right?** §6.6 says name the protocol, keep
-it in-process, and gives four trigger conditions. The risk is that an
-in-process-only design quietly accretes assumptions (shared mutable frames,
-callbacks that block the loop) that make the later split harder than it looks.
-Is a protocol enough discipline, or does the cheap version have to be a real
-transport from day one to keep the seam honest?
+**Q8 — Is the in-process bus the right stopping point?** §6.6 builds a real
+bus (two subscription modes, per-subscriber queues, lossless contracts) but keeps
+it in one process. Two ways this could be wrong: (a) the deferral is too
+conservative and we should go cross-process now while the design is fresh;
+(b) the bus is already over-built for one process and a pair of
+`threading.Thread`s plus two queues would do. Which?
+
+Sub-question with teeth: for `lossless=True`, is **aborting the episode** on a
+dropped frame the right call, or too brittle for a human-in-the-loop session
+where restarting a trial is expensive? The alternative is recording the gap and
+flagging the episode, which keeps the run but admits a dataset you must
+remember to filter.
 
 **Q9 — Fault isolation sooner?** Today a dying Flask takes the control loop with
 it, because Flask hosts the loop thread. Should splitting *that* (loop in its
@@ -877,6 +1035,11 @@ unreadable. Which, if any, should collapse?
 | Follower arm is already behind an HTTP service; both apps are clients | `follower_single_server.py`, `FollowerClient` |
 | Cameras are RealSense, claimed per-process (`cfg.enable_device(serial)`) | `camera_manager.py:84` |
 | Four camera subscribers already exist, all in one process | `infer_loop.py` (policy, video_recorder, recorder, /video_feed) |
+| PyAV encode + LeRobot dataset writes run **inline on the control thread** | `infer_loop.py:274-275`, `:304+` |
+| Frames carry no `seq` or capture time; `_last_frame_time` is used only by `health()` | `camera_manager.py:175,273,313` |
+| `get_latest_frame()` copies per reader **while holding the camera lock** | `camera_manager.py:299-305` |
+| `read()` allocates a fresh array per frame (`cv2.cvtColor`/`resize`), so published frames are never mutated in place | `camera_manager.py:88-100` |
+| The two modes needed (latest-value vs stream) are DDS/Zenoh History QoS: `KEEP_LAST(1)` vs `KEEP_ALL` | prior art |
 | `CameraManager` is one class in one file, imported by both apps | no duplicated camera code |
 | Camera load is ~12 MB/s (2 x 256x256x3 @ 30 Hz) | arithmetic |
 | `pyzmq 27.1.0` already installed via agentlace | `importlib.metadata` |
