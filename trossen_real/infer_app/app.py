@@ -20,6 +20,10 @@ Run (needs `follower_single_server.py` AND `policy_server.py` already
 running):
 
     python -m trossen_real.infer_app.app --port 5080
+
+    INFER_POLICY_CHUNK_STEPS=-1 INFER_IMAGE_ENCODING=jpeg INFER_JPEG_QUALITY=95 python -m trossen_real.infer_app.app --port 5080
+
+    
 """
 
 from __future__ import annotations
@@ -305,8 +309,11 @@ def api_connect():
 
                 res_log = body.get("residual_log")
                 if res_log is None:
+                    # `config`, not `state.config`: inside /api/connect the
+                    # station config is still a local and is only published to
+                    # `state` ~100 lines later, after every other check passes.
                     res_log = str(LOG_DIR / "residual" /
-                                  f"residual_{state.config.station_name}_"
+                                  f"residual_{config.station_name}_"
                                   f"{time.strftime('%Y%m%d_%H%M%S')}.jsonl")
                 try:
                     policy = ResidualPolicyClient(
