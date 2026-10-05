@@ -460,6 +460,9 @@ def api_connect():
         dataset_recording_enabled=enable_dataset_recording,
         eval_mode=state.eval is not None,
         eval_config=(state.eval.config.to_dict() if state.eval is not None else None),
+        # None when no residual checkpoint was given, so the UI can say plainly
+        # whether RL is in the loop rather than leaving it to be inferred.
+        residual=getattr(state.policy, "meta", None),
     )
 
 

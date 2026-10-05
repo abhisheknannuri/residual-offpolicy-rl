@@ -5,6 +5,10 @@ const els = {
   forceActionSpace: document.getElementById("force-action-space"),
   enableIntervention: document.getElementById("enable-intervention"),
   enableDatasetRecording: document.getElementById("enable-dataset-recording"),
+  residualCheckpoint: document.getElementById("residual-checkpoint"),
+  residualScale: document.getElementById("residual-scale"),
+  residualCollectQ: document.getElementById("residual-collect-q"),
+  residualAssert: document.getElementById("residual-assert"),
   connectBtn: document.getElementById("connect-btn"),
   disconnectBtn: document.getElementById("disconnect-btn"),
   connectionStatus: document.getElementById("connection-status"),
@@ -111,11 +115,29 @@ async function connect() {
         force_action_space: els.forceActionSpace.checked,
         enable_intervention: els.enableIntervention.checked,
         enable_dataset_recording: els.enableDatasetRecording.checked,
+        // Residual RL: only sent when a checkpoint path is filled in, so an
+        // empty field means plain base BC and the server skips the wrap
+        // entirely.
+        ...residualConnectExtras(),
         // eval.js contributes eval_config_name / checkpoint_label / operator when
         // eval mode is on; absent entirely otherwise.
         ...(window.evalConnectExtras ? window.evalConnectExtras() : {}),
       },
     });
+    // Say plainly whether RL is in the loop. Silence here was the thing that
+    // made it impossible to tell base BC from base BC + residual.
+    if (data.residual) {
+      const r = data.residual;
+      const ok = r.expected_base_sha256 === r.server_base_sha256;
+      els.policyStatus.textContent =
+        `RESIDUAL RL ACTIVE - ${r.checkpoint.split("/").slice(-2).join("/")} | ` +
+        `scale=${r.residual_scale} | Q=${r.collect_q ? "on" : "off"} | ` +
+        `base sha ${ok ? "verified" : "MISMATCH"} | warmup ${r.warmup_ms}ms`;
+      els.policyStatus.style.color = ok ? "#1a7f37" : "#b3261e";
+    } else {
+      els.policyStatus.textContent = "base BC only (no residual checkpoint)";
+      els.policyStatus.style.color = "";
+    }
     cameraNames = data.cameras || [];
     buildVideoGrid();
     setConnectionPill("connected");
@@ -143,6 +165,17 @@ async function disconnect() {
   els.interventionStatus.textContent = "";
   els.datasetStatus.textContent = "";
   els.errorStatus.textContent = "";
+}
+
+function residualConnectExtras() {
+  const ckpt = els.residualCheckpoint ? els.residualCheckpoint.value.trim() : "";
+  if (!ckpt) return {};          // blank = off, behaviour unchanged
+  return {
+    residual_checkpoint: ckpt,
+    residual_scale: parseFloat(els.residualScale.value) || 1.0,
+    collect_q: els.residualCollectQ.checked,
+    base_policy_assert: els.residualAssert.value,
+  };
 }
 
 async function startInference() {
