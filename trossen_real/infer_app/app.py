@@ -288,6 +288,44 @@ def api_connect():
             else:
                 logger.info("Policy fetching: per-tick (one /predict round trip per control step)")
 
+            # ---- OPTIONAL residual RL wrap -----------------------------------
+            # Purely additive: with no `residual_checkpoint` in the request this
+            # whole block is skipped and the app behaves exactly as before.
+            #
+            # ResidualPolicyClient is a drop-in for PolicyClient, so wrapping it
+            # HERE means infer_loop.py needs no changes at all - it still just
+            # calls policy.predict_full(obs) and gets an action in real units.
+            residual_ckpt = (body.get("residual_checkpoint") or "").strip()
+            if residual_ckpt:
+                from trossen_real.inference.residual_client import (
+                    BasePolicyMismatch,
+                    ResidualPolicyClient,
+                    ResidualUnavailable,
+                )
+
+                res_log = body.get("residual_log")
+                if res_log is None:
+                    res_log = str(LOG_DIR / "residual" /
+                                  f"residual_{state.config.station_name}_"
+                                  f"{time.strftime('%Y%m%d_%H%M%S')}.jsonl")
+                try:
+                    policy = ResidualPolicyClient(
+                        policy, residual_ckpt,
+                        device=body.get("residual_device"),
+                        collect_q=bool(body.get("collect_q", True)),
+                        base_policy_assert=str(body.get("base_policy_assert", "strict")),
+                        log_path=res_log,
+                        residual_scale=float(body.get("residual_scale", 1.0)),
+                    )
+                except BasePolicyMismatch as exc:
+                    follower.disconnect()
+                    return jsonify(error=str(exc)), 409
+                except (ResidualUnavailable, Exception) as exc:
+                    follower.disconnect()
+                    return jsonify(error=f"could not load residual policy: {exc}"), 400
+                logger.info("Residual RL ACTIVE: %s", policy.meta)
+                logger.info("Residual tick log: %s", res_log)
+
             image_encoding = str(body.get("image_encoding", DEFAULT_IMAGE_ENCODING))
             jpeg_quality = int(body.get("jpeg_quality", DEFAULT_JPEG_QUALITY))
             if image_encoding not in IMAGE_ENCODINGS:
