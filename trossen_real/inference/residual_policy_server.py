@@ -27,6 +27,25 @@ the in-process path has none.
 NOTE ON THE BASE POLICY: this server owns the base client too, so the images
 arrive here once and the base query happens server-side. That keeps the wire
 payload to one set of frames per tick rather than two.
+
+!! USE raw OR zlib, NOT jpeg, WHEN THE RL IS BEHIND THIS SERVER !!
+
+In-process, the residual client is handed the UNENCODED frames, so the encoder
+sees exactly what training fed it. Over this server there are no raw frames to
+hand over - only the wire payload - so the images must be decoded back, and a
+jpeg round trip is then baked into the RL's input.
+
+That is not a cosmetic difference. Measured on real wrist-cam frames, jpeg q95
+changes the residual by up to 0.0199, which is 39.7% of the smallest
+action_scale and roughly 96% of the residual's own mean magnitude. The pixel
+error looks negligible (0.67/255 at 84x84); the OUTPUT error is not. The policy
+amplifies it.
+
+zlib is lossless and ~2.9x smaller than raw, and with the base policy chunked
+the frames only cross the wire once per n_action_steps anyway, so the bandwidth
+argument for jpeg mostly evaporates. This server refuses jpeg by default for
+that reason; --allow-lossy overrides it if you are deliberately measuring the
+effect.
 """
 
 from __future__ import annotations
@@ -43,6 +62,42 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+class LossyInput(RuntimeError):
+    """jpeg frames reached the RL encoder. See the module docstring."""
+
+
+_warned_lossy = [False]
+
+
+def _check_lossless(body: dict) -> None:
+    """Refuse jpeg input unless explicitly allowed.
+
+    Loud rather than silent because the damage is invisible: the arm keeps
+    moving, the numbers look plausible, and the residual is simply wrong by
+    about its own magnitude.
+    """
+    lossy = [k for k, v in body.items()
+             if k.startswith("observation.images.")
+             and isinstance(v, dict) and v.get("encoding") == "jpeg"]
+    if not lossy:
+        return
+    if state.allow_lossy:
+        if not _warned_lossy[0]:
+            _warned_lossy[0] = True
+            logger.warning(
+                "jpeg frames are reaching the RL encoder (%s). Training used clean "
+                "frames; measured effect is ~40%% of the smallest action_scale. "
+                "Proceeding because --allow-lossy was passed.", ", ".join(lossy))
+        return
+    raise LossyInput(
+        f"jpeg-encoded frames ({', '.join(lossy)}) would reach the RL encoder, which "
+        f"training never saw. Measured effect: up to 39.7% of the smallest "
+        f"action_scale. Send image_encoding='zlib' (lossless, ~2.9x smaller than raw) "
+        f"or 'raw', or pass --allow-lossy to this server if you are deliberately "
+        f"measuring the degradation."
+    )
+
+
 class _State:
     client: Any = None
     started: float = 0.0
@@ -51,6 +106,7 @@ class _State:
     dt_max: float = 0.0
     residual_abs_max: float = 0.0
     q_sum: float = 0.0
+    allow_lossy: bool = False
 
 
 state = _State()
@@ -111,7 +167,12 @@ def _handler_cls():
 
             t0 = time.perf_counter()
             try:
-                out = c.predict_full(json.loads(raw))
+                body = json.loads(raw)
+                _check_lossless(body)
+                out = c.predict_full(body)
+            except LossyInput as exc:
+                self._send({"error": str(exc)}, 400)
+                return
             except Exception as exc:
                 logger.exception("predict failed")
                 self._send({"error": f"{type(exc).__name__}: {exc}"}, 500)
@@ -156,7 +217,11 @@ def main() -> None:
     ap.add_argument("--log", default=None, help="per-tick JSONL path")
     ap.add_argument("--residual-scale", type=float, default=1.0,
                     help="commissioning dial: 0.0 = pure BC, 1.0 = as trained")
+    ap.add_argument("--allow-lossy", action="store_true",
+                    help="accept jpeg frames for the RL encoder (see the module "
+                         "docstring - this measurably changes the residual)")
     args = ap.parse_args()
+    state.allow_lossy = args.allow_lossy
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -182,7 +247,10 @@ def main() -> None:
     logger.info("residual policy server on http://%s:%d  (base: %s)",
                 args.host, args.port, args.base_url)
     logger.info("  checkpoint: %s", args.checkpoint)
-    logger.info("  residual_scale=%s collect_q=%s", args.residual_scale, not args.no_q)
+    logger.info("  residual_scale=%s collect_q=%s allow_lossy=%s",
+                args.residual_scale, not args.no_q, args.allow_lossy)
+    if not args.allow_lossy:
+        logger.info("  jpeg input will be REFUSED - send image_encoding='zlib' or 'raw'")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
