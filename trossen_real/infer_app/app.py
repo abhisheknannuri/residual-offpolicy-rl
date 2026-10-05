@@ -180,16 +180,38 @@ def _station_name() -> str:
 def _eval_policy_meta() -> dict:
     """Everything needed to reproduce a run later. `n_action_steps` matters most:
     it is an EVAL-time server flag that can differ from the trained value, so two
-    runs are only comparable if it matches."""
+    runs are only comparable if it matches.
+
+    `residual` is None for a plain BC run and carries the full residual identity
+    otherwise. Without it an eval run driven by a residual policy would be
+    recorded as if it were plain BC - results you cannot attribute, which is
+    worse than no results.
+    """
     ph = state.policy_health or {}
-    return {
+    res = getattr(state.policy, "meta", None)
+    out = {
         "checkpoint": ph.get("checkpoint"),
         "device": ph.get("device"),
         "chunk_size": ph.get("chunk_size"),
         "n_action_steps": ph.get("n_action_steps"),
         "likely_action_space": ph.get("likely_action_space"),
         "action_space": state.infer_loop.action_space if state.infer_loop is not None else None,
+        # "bc" or "bc+residual" - the single field that says what was actually
+        # driving the arm, without having to interpret the rest.
+        "policy_kind": "bc+residual" if res else "bc",
+        "residual": None if not res else {
+            "checkpoint": res.get("checkpoint"),
+            "actor_updates": res.get("actor_updates"),
+            "residual_scale": res.get("residual_scale"),
+            "rl_image_size": res.get("rl_image_size"),
+            "collect_q": res.get("collect_q"),
+            "expected_base_sha256": res.get("expected_base_sha256"),
+            "server_base_sha256": res.get("server_base_sha256"),
+            "base_verified": res.get("expected_base_sha256") == res.get("server_base_sha256"),
+            "dataset": res.get("dataset"),
+        },
     }
+    return out
 
 
 # ----------------------------------------------------------------------
