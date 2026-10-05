@@ -279,7 +279,12 @@ class InferenceLoop:
 
                 # Always called, even while intervened - the result is simply not applied to
                 # the follower in that case (see module docstring / InterventionManager).
-                result = self.policy.predict_full(obs)  # {"action": real units, "action_normalized": diagnostic-only}
+                # `raw_images` is the UNENCODED frames. Every policy client
+                # ignores it except a residual wrapper, which needs real pixels
+                # and would otherwise have to decode the wire payload back -
+                # giving the RL encoder a jpeg round-trip that training never
+                # applied.
+                result = self.policy.predict_full(obs, raw_images=images)  # {"action": real units, ...}
                 predicted = result["action"]
                 policy_action = reconstruct_absolute_action(
                     self.action_space, predicted, follower_state,

@@ -173,6 +173,8 @@ class ResidualPolicyClient:
         self._log = ResidualTickLog(log_path) if log_path else None
 
         self.ticks = 0
+        self._used_raw = 0
+        self._used_decoded = 0
         self.meta: dict[str, Any] = {}
         self._load(device, base_policy_assert)
 
@@ -325,10 +327,19 @@ class ResidualPolicyClient:
         """
         self.base.reset()
 
-    def predict(self, obs: dict) -> np.ndarray:
-        return self.predict_full(obs)["action"]
+    def predict(self, obs: dict, raw_images: dict | None = None) -> np.ndarray:
+        return self.predict_full(obs, raw_images)["action"]
 
-    def predict_full(self, obs: dict) -> dict:
+    def predict_full(self, obs: dict, raw_images: dict | None = None) -> dict:
+        """`raw_images`: the undecoded camera frames, when the caller has them.
+
+        Strongly preferred over decoding the wire payload. Training fed the RL
+        encoder a clean frame resized to 84; decoding a jpeg back would add
+        artifacts training never saw. Measured on real wrist-cam frames that
+        mismatch is small - 0.67/255 mean at 84x84, below the 1.39 the dataset's
+        own AV1 encoding already contributes - but it is free to avoid, and
+        skipping the decode saves time on the control path too.
+        """
         torch = self._torch
         t0 = time.perf_counter()
 
@@ -341,7 +352,7 @@ class ResidualPolicyClient:
                                      device=self.device).unsqueeze(0)
             base_n = self.scaler.scale(base_t)
 
-            rl_obs = self._rl_obs(obs, base_n)
+            rl_obs = self._rl_obs(obs, base_n, raw_images)
             residual = self.agent.act(rl_obs, eval_mode=True, stddev=0.0, cpu=False)
             if self.residual_scale != 1.0:
                 residual = residual * self.residual_scale
@@ -390,21 +401,42 @@ class ResidualPolicyClient:
             "residual": res_np,
             "residual_abs_max": float(np.abs(res_np).max()),
             "clipped_amount": clipped,
+            "image_source": "raw" if raw_images is not None else "decoded",
             **qinfo,
         })
         return out
 
-    def _rl_obs(self, obs: dict, base_n: Any) -> dict:
-        """Decode, resize to the RL size, standardize. The base saw full res."""
+    @property
+    def image_source_counts(self) -> dict[str, int]:
+        """How many frames came in clean vs had to be decoded back.
+
+        Decoded frames carry jpeg artifacts the RL encoder never saw in
+        training. A nonzero `decoded` count means something is calling
+        predict_full() without raw_images.
+        """
+        return {"raw": self._used_raw, "decoded": self._used_decoded}
+
+    def _rl_obs(self, obs: dict, base_n: Any, raw_images: dict | None = None) -> dict:
+        """Resize to the RL size and standardize. The base policy saw full res.
+
+        Prefers `raw_images` (clean pixels, as training had) and falls back to
+        decoding the wire payload only when the caller did not supply them.
+        """
         torch = self._torch
         import torch.nn.functional as F
 
         out: dict[str, Any] = {}
         for key in self.image_keys:
-            raw = obs.get(key)
-            if raw is None:
-                raise KeyError(f"residual needs image '{key}' in the observation")
-            img = decode_image(raw) if isinstance(raw, dict) else np.asarray(raw)
+            cam = key.removeprefix("observation.images.")
+            if raw_images is not None and cam in raw_images:
+                img = np.asarray(raw_images[cam])
+                self._used_raw += 1
+            else:
+                raw = obs.get(key)
+                if raw is None:
+                    raise KeyError(f"residual needs image '{key}' in the observation")
+                img = decode_image(raw) if isinstance(raw, dict) else np.asarray(raw)
+                self._used_decoded += 1
             t = torch.from_numpy(np.ascontiguousarray(img)).permute(2, 0, 1)
             t = t.unsqueeze(0).to(self.device).float()
             if t.shape[-1] != self.rl_image_size or t.shape[-2] != self.rl_image_size:

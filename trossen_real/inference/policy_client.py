@@ -116,10 +116,17 @@ class PolicyClient:
     def predict(self, obs: dict) -> np.ndarray:
         return self.predict_full(obs)["action"]
 
-    def predict_full(self, obs: dict) -> dict:
+    def predict_full(self, obs: dict, raw_images: dict | None = None) -> dict:
         """Same as `predict()` but returns the FULL `/predict` response as
         numpy arrays - `{"action": ..., "action_normalized": ...}` - for
         callers that want to log/inspect the model's raw (still-normalized)
+
+        `raw_images`: accepted and IGNORED here. It exists so the control loop
+        can hand the undecoded camera frames to any wrapper that needs real
+        pixels (`ResidualPolicyClient` does) without that wrapper having to
+        decode the wire payload back. Adding it as an ignored parameter keeps
+        one call signature across every policy client.
+
         output alongside the real-units one it actually acts on (see
         `policy_server.py::_predict()`'s docstring for why `action_normalized`
         is diagnostic-only, never meant to be used for control)."""
@@ -206,7 +213,7 @@ class ChunkedPolicyClient:
         self._queue.clear()
         self.client.reset()
 
-    def predict_full(self, obs: dict) -> dict:
+    def predict_full(self, obs: dict, raw_images: dict | None = None) -> dict:
         if not self._queue:
             chunk = self.client.predict_chunk(obs, self.n_steps)
             if not chunk:
