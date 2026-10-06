@@ -394,6 +394,18 @@ def _common_setup(cfg):
     setup_logging(
         "online_rl_real" if cfg.real_hardware else "online_rl_sim", level=logging.WARNING, capture_print=False
     )
+    # setup_logging sets the ROOT level to WARNING and leaves capture_print off.
+    # Both are deliberate (see its docstring: this is the tqdm-heavy script with
+    # a "never touch stdout" bar), but together they meant every distributed
+    # diagnostic was invisible in app.log: logger.info() was dropped by the root
+    # level, and the 84 print() calls were never captured. An actor that sat
+    # idle for 68 s produced a log file containing nothing but call_stats.
+    #
+    # Raise ONLY these two loggers, so the file gains the actor/learner phase
+    # trace without every library's INFO chatter. The handlers have no level of
+    # their own, so a record that passes the logger level is written.
+    for _diag_logger in (__name__, "resfit.rl_finetuning.off_policy.distributed.comms"):
+        logging.getLogger(_diag_logger).setLevel(logging.INFO)
     # ↓↓↓ verbatim from train_residual_td3.py:305-326
     device_str = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(device_str)
@@ -633,23 +645,37 @@ def _make_get_envs(cfg):
             else:
                 print("[actor] policy fetching: per-query /predict (policy_chunk_steps=0)")
 
+            logger.info("[env] 3a: starting cameras (%d configured)",
+                        len(station_config.cameras.devices))
             cameras = CameraManager(station_config)
             cameras.start()
             _time.sleep(1.0)  # let the camera threads produce their first real frames
+            logger.info("[env] 3b: cameras up - %s", cameras.health())
 
             leader = None
             pedal = None
             if enable_intervention:
                 try:
+                    # A HANG here, rather than an exception, is the usual
+                    # failure: an unpowered or unreachable leader leaves
+                    # connect() blocking inside the SDK, so the except below
+                    # never runs and the actor never reaches its rollout loop.
+                    logger.info("[env] 3c: connecting the LEADER arm at %s "
+                                "(enable_intervention=true). If this is the last "
+                                "line you see, the leader is not reachable.",
+                                station_config.leader_ips["single"])
                     leader = TrossenSingleLeader(station_config.leader_ips["single"])
                     leader.connect()
+                    logger.info("[env] 3d: leader connected")
                 except Exception as exc:
                     cameras.stop()
                     follower.disconnect()
                     raise RuntimeError(
                         f"enable_intervention=true but could not connect the leader arm - {exc}"
                     ) from exc
+                logger.info("[env] 3e: opening the foot pedal")
                 pedal = PedalListener()
+                logger.info("[env] 3f: pedal ready (healthy=%s)", pedal.is_healthy())
 
             real_image_keys = [cfg.rl_camera] if isinstance(cfg.rl_camera, str) else list(cfg.rl_camera)
             reset_cfg = station_config.reset["single"]
