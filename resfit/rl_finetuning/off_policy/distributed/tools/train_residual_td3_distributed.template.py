@@ -579,8 +579,21 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
         global_step = env_step  # the verbatim logging/checkpoint regions read `global_step`
         comms.extra["env_step"] = env_step
 
-        if env_step > cfg.algo.total_timesteps or comms.actor_done:
+        if env_step > cfg.algo.total_timesteps:
             break
+        if comms.actor_done:
+            # NOT a reason to stop. The actor sends done=True from its finally:
+            # block on any exit, Ctrl+C included, so this used to end the
+            # learner's run whenever the actor was restarted. Keep training on
+            # the existing buffer and wait for an actor to come back; the run
+            # ends on total_timesteps.
+            comms.actor_done = False
+            comms.n_actor_disconnects += 1
+            print(colored(
+                f"[learner] actor {comms.actor_done_session or '?'} DISCONNECTED "
+                f"(#{comms.n_actor_disconnects}). NOT ending the run - still training on "
+                f"the existing buffer and waiting for an actor to reconnect. "
+                f"env_step={env_step}/{cfg.algo.total_timesteps}.", "yellow"))
 
         if comms.last_heartbeat_t and time.monotonic() - comms.last_heartbeat_t > 30:
             if time.monotonic() - last_stale_warn > 30:
@@ -777,14 +790,20 @@ def _actor_body(cfg, comms: ActorComms, fp_hash: str, fp_flat: dict, device, dev
             continue
 
         if phase == PHASE_TRAINING:
-            print("[actor] waiting for first weights from learner...")
+            logger.info("[actor] waiting for first weights from learner over PUB/SUB "
+                        "port %s - if this is the last line, the weight channel is "
+                        "not delivering", cfg.dist.broadcast_port)
             t_wait = time.monotonic()
             applied = None
             while applied is None and comms.phase == PHASE_TRAINING:
                 applied = comms.receiver.apply_if_new(agent)
                 if applied is None:
                     if time.monotonic() - t_wait > 15:
-                        print("[actor] still waiting for weights (learner republishes periodically)...")
+                        logger.warning(
+                            "[actor] STILL no weights after 15s. The learner republishes "
+                            "every republish_every_s, so this means the PUB/SUB channel on "
+                            "port %s is not reaching this actor. Check that forward.",
+                            cfg.dist.broadcast_port)
                         t_wait = time.monotonic()
                     time.sleep(0.1)
             if applied is None:

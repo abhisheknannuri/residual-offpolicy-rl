@@ -84,6 +84,8 @@ class LearnerComms:
         self.env_step_reported = -1
         self.actor_done = False
         self.done_acked = False  # actor heartbeat received while phase == DONE
+        self.actor_done_session: str | None = None
+        self.n_actor_disconnects = 0
         self.last_heartbeat_t = 0.0
         self.n_heartbeats = 0
         self._stats: deque[dict[str, Any]] = deque()
@@ -236,7 +238,12 @@ class LearnerComms:
                 if env_step > self.env_step_reported:
                     self.env_step_reported = env_step
                 if payload.get("done"):
+                    # An actor says "done" from its `finally:` block, which runs
+                    # on ANY exit - including Ctrl+C. Treating that as "training
+                    # is complete" meant killing the actor terminated the
+                    # learner's whole run. Record it; the learner decides.
                     self.actor_done = True
+                    self.actor_done_session = payload.get("actor_session")
                 if self.phase == PHASE_DONE:
                     self.done_acked = True
                 for item in payload.get("stats", ()):
