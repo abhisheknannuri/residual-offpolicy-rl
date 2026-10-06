@@ -74,21 +74,26 @@ Already confirmed clean — every hyper-parameter line is byte-identical.
 
 | Piece | Where |
 |---|---|
-| Entrypoint (**generated**, do not hand-edit) | `resfit/rl_finetuning/scripts/train_residual_td3_distributed.py` |
-| Its template + build script | `resfit/rl_finetuning/off_policy/distributed/tools/` |
+| Entrypoint (**hand-maintained** — edit it directly) | `resfit/rl_finetuning/scripts/train_residual_td3_distributed.py` |
 | n-step stream, outbox/inbox, weight sync, transport, comms | `resfit/rl_finetuning/off_policy/distributed/*.py` |
 | Unit tests (13) | `.../distributed/tests/test_distributed_parity.py` |
 | End-to-end localhost test (19 checks) | `.../distributed/tests/e2e_localhost.py` |
 
 `role=single` calls your original `train_residual_td3.main()` directly — same code, not a copy.
-`role=learner` / `role=actor` reuse ~900 lines of the original **spliced verbatim** by line
-range; every splice's first/last line is anchor-checked, so if `train_residual_td3.py` changes
-the build fails instead of silently splicing the wrong code:
+`role=learner` / `role=actor` contain ~900 lines that were originally copied from that trainer.
 
-```bash
-<python> resfit/rl_finetuning/off_policy/distributed/tools/build_entrypoint.py --check   # stale?
-<python> resfit/rl_finetuning/off_policy/distributed/tools/build_entrypoint.py           # rebuild
-```
+> **The entrypoint is no longer generated.** It used to be built from a template
+> by `build_entrypoint.py`, which spliced regions out of `train_residual_td3.py`
+> by line number and anchor-checked them. That broke: `train_residual_td3.py`
+> drifted, splice 305-326 stopped matching its anchor, `--check` failed, and the
+> file was being hand-edited anyway while still carrying a "DO NOT EDIT" header.
+> The template and builder have been removed. **Edit the entrypoint directly.**
+>
+> The `verbatim from train_residual_td3.py:A-B` comments are kept as
+> provenance — they say where a region came from, which is useful when
+> comparing behaviour against the single-process trainer. Nothing checks them
+> and the line numbers drift, so read them as "this came from there", not as
+> "these lines are identical today".
 
 Run the tests (no uv):
 

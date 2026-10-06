@@ -1,9 +1,21 @@
 # =============================================================================
-# GENERATED FILE - DO NOT EDIT BY HAND.
-#   template: resfit/rl_finetuning/off_policy/distributed/tools/train_residual_td3_distributed.template.py
-#   build:    <python> resfit/rl_finetuning/off_policy/distributed/tools/build_entrypoint.py
-# Regions between "verbatim from train_residual_td3.py:A-B" markers are exact copies
-# of the original trainer, anchor-checked at build time.
+# HAND-MAINTAINED SOURCE. Edit this file directly.
+#
+# This used to be generated from a template by build_entrypoint.py, which
+# spliced regions out of train_residual_td3.py by line number and checked them
+# against ANCHORS. That stopped working: train_residual_td3.py drifted, splice
+# 305-326 no longer matched its anchor, and `--check` failed - so the file could
+# not be rebuilt and was being hand-edited anyway, with a header still saying
+# DO NOT EDIT. Two sources of truth, one of them wrong.
+#
+# The template and builder are gone. This is the source now.
+#
+# The "verbatim from train_residual_td3.py:A-B" comments are KEPT, because the
+# provenance is genuinely useful - they say which regions were copied from the
+# single-process trainer and where to look when comparing behaviour. They are
+# now documentation, not a build contract: nothing checks them, and the line
+# numbers they name drift as that file changes. Treat them as "this logic came
+# from there", not as "these lines are identical today".
 # =============================================================================
 """Distributed actor/learner entrypoint for ResFiT residual TD3 (agentlace).
 
