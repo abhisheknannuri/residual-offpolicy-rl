@@ -366,8 +366,8 @@ class ActorComms:
                 _say(
                     f"[actor] cannot read the learner's store cursor "
                     f"({self.n_push_failures} failures) - NO transitions are "
-                    f"reaching the learner. {self.outbox.size() if hasattr(self.outbox, 'size') else '?'} "
-                    f"queued locally.",
+                    f"reaching the learner. {self.outbox.latest_data_id()} queued "
+                    f"locally and growing.",
                     "red", level=logging.WARNING,
                 )
             return

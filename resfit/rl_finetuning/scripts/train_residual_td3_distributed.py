@@ -2012,8 +2012,9 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
                 "the actor reported done"
             )
             print(colored(f"[learner] online loop exiting: {_reason} "
-                          f"(grad_step={grad_step}, actor transitions received="
-                          f"{comms.n_received if hasattr(comms, 'n_received') else '?'})", "cyan"))
+                          f"(grad_step={grad_step}, online buffer={comms.online_size}, "
+                          f"heartbeats={comms.n_heartbeats}, "
+                          f"actor={comms.actor_session or 'NEVER CONNECTED'})", "cyan"))
             break
 
         if comms.last_heartbeat_t:
@@ -2436,7 +2437,9 @@ def actor_main(cfg):
 
 
 def _actor_body(cfg, comms: ActorComms, fp_hash: str, fp_flat: dict, device, device_str):
+    logger.info("[actor] startup 1/5: handshake - waiting for learner init")
     init = comms.get_init()
+    logger.info("[actor] startup 2/5: learner init received")
     _verify_fingerprint(fp_hash, fp_flat, init)
     action_scaler, state_standardizer = _normalizers_from_payload(cfg, init["normalization"], device)
     base_policy, eval_base_policy = _load_base_policies(cfg, device)
@@ -2492,6 +2495,7 @@ def _actor_body(cfg, comms: ActorComms, fp_hash: str, fp_flat: dict, device, dev
             )
     # ↑↑↑ end verbatim train_residual_td3.py:608-643
 
+    logger.info("[actor] startup 3/5: building the env (robot, cameras, leader, pedal) - a hang HERE means hardware, not networking")
     get_envs = _make_get_envs(cfg)
     env = get_envs(
         env_name=cfg.task,
@@ -2546,6 +2550,7 @@ def _actor_body(cfg, comms: ActorComms, fp_hash: str, fp_flat: dict, device, dev
         image_keys: list[str] = [cfg.rl_camera]
     else:
         image_keys = list(cfg.rl_camera)
+    logger.info("[actor] startup 4/5: env ready")
     lowdim_dim = env.observation_space["observation.state"].shape[1]
     img_c, img_h, img_w = env.observation_space[image_keys[0]].shape[1:]
     action_dim = env.action_space.shape[1]
@@ -2572,6 +2577,7 @@ def _actor_body(cfg, comms: ActorComms, fp_hash: str, fp_flat: dict, device, dev
             "image_keys": list(image_keys),
         }
     )
+    logger.info("[actor] startup 5/5: comms thread starting - the heartbeat that tracks the learner phase begins NOW")
     comms.start()
 
     # One continuous n-step stream across warm-up and online collection - identical to
