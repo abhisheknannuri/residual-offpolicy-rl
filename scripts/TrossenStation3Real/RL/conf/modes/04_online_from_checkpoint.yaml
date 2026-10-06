@@ -8,6 +8,6 @@ algo:
   critic_warmup_steps: 0
   train_offline_rl: false
   offline_rl_steps: 0
-  total_timesteps: 75000
+  total_timesteps: 200000
   offline_pretrain_only: false
 # resume_ckpt is intentionally left unset here - the run scripts require it.

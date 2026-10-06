@@ -1978,7 +1978,13 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
 
     comms.set_phase(PHASE_TRAINING)
     comms.publish(agent, grad_step)
-    print(colored(f"[learner] initial weights published; online training from env_step={env_step}", "cyan"))
+    _t_training_start = time.monotonic()
+    _actor_state = (
+        f"actor registered (session={comms.actor_session})" if comms.actor_session
+        else "NO ACTOR REGISTERED YET - it must connect before any new experience is collected"
+    )
+    print(colored(f"[learner] initial weights published; online training from env_step={env_step}; "
+                  f"{_actor_state}", "cyan"))
 
     while True:
         iter_start = time.time()
@@ -1998,16 +2004,41 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
         comms.extra["env_step"] = env_step
 
         if env_step > cfg.algo.total_timesteps or comms.actor_done:
+            # Say WHY, instead of leaving "phase: training -> done" to be
+            # reverse-engineered from a duration.
+            _reason = (
+                f"env_step {env_step} > total_timesteps {cfg.algo.total_timesteps}"
+                if env_step > cfg.algo.total_timesteps else
+                "the actor reported done"
+            )
+            print(colored(f"[learner] online loop exiting: {_reason} "
+                          f"(grad_step={grad_step}, actor transitions received="
+                          f"{comms.n_received if hasattr(comms, 'n_received') else '?'})", "cyan"))
             break
 
-        if comms.last_heartbeat_t and time.monotonic() - comms.last_heartbeat_t > 30:
-            if time.monotonic() - last_stale_warn > 30:
+        if comms.last_heartbeat_t:
+            if time.monotonic() - comms.last_heartbeat_t > 30 and time.monotonic() - last_stale_warn > 30:
                 print(colored(
                     f"[learner] no actor heartbeat for {time.monotonic() - comms.last_heartbeat_t:.0f}s - "
                     "still training on the existing buffer",
                     "yellow",
                 ))
                 last_stale_warn = time.monotonic()
+        elif time.monotonic() - last_stale_warn > 30:
+            # NO actor has EVER connected. This used to be silent, because the
+            # warning above required last_heartbeat_t to be truthy - so the
+            # worse case said nothing at all. A learner doing "online" RL with
+            # no actor is training purely on the pre-existing buffer and
+            # collecting no new experience, which is not online RL; it just
+            # looks like a short successful run.
+            last_stale_warn = time.monotonic()
+            print(colored(
+                f"[learner] NO ACTOR HAS EVER CONNECTED ({time.monotonic() - _t_training_start:.0f}s "
+                f"into online training). env_step is stuck at {env_step} and every gradient step is "
+                f"on the pre-existing buffer - no new experience is being collected. "
+                f"Check the actor is running and that its REQ/REP channel to this learner is up.",
+                "red",
+            ))
 
         if target_utd is not None and updates_since_start >= float(target_utd) * max(0, env_step - start_env_step):
             comms.maybe_publish(agent, grad_step, republish_every_s=float(cfg.dist.republish_every_s))

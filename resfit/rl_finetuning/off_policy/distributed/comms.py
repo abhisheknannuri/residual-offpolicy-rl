@@ -251,6 +251,25 @@ class LearnerComms:
 # =============================================================================
 # Actor
 # =============================================================================
+def _say(msg: str, color: str | None = None, *, level: int = logging.INFO) -> None:
+    """Print AND log.
+
+    The actor writes `app.log` through the logging module, but every
+    distributed diagnostic in this file and in the trainer was a bare
+    `print()` - 84 of them against 11 logger calls. So when an actor sat idle
+    for 68 s and was killed, its log contained nothing but call_stats: the
+    "[actor] idle - learner phase: init" line that would have explained it went
+    to a terminal nobody had kept.
+    """
+    try:
+        from termcolor import colored
+
+        print(colored(msg, color) if color else msg)
+    except ImportError:
+        print(msg)
+    logger.log(level, msg)
+
+
 class ActorComms:
     def __init__(self, dist_cfg, *, freeze_encoder: bool):
         _, TrainerClient, TrainerConfig = import_agentlace(dist_cfg.codec)
@@ -282,6 +301,10 @@ class ActorComms:
 
         self.n_pushed = 0
         self.n_push_failures = 0
+        self.n_heartbeat_failures = 0
+        self._last_status_t = time.monotonic()
+        self._last_stale_warn = 0.0
+        self._last_push_warn = 0.0
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
 
@@ -333,7 +356,20 @@ class ActorComms:
     def _push_transitions(self) -> None:
         from_id = self.client.get_server_last_update_id(STORE_ONLINE)
         if from_id is None:
+            # This is the call behind "Failed to get last update id" in the
+            # agentlace logs. It used to bump a counter nobody printed, so a
+            # actor that could not push a single transition looked identical to
+            # one that had nothing to push.
             self.n_push_failures += 1
+            if time.monotonic() - self._last_push_warn > 10:
+                self._last_push_warn = time.monotonic()
+                _say(
+                    f"[actor] cannot read the learner's store cursor "
+                    f"({self.n_push_failures} failures) - NO transitions are "
+                    f"reaching the learner. {self.outbox.size() if hasattr(self.outbox, 'size') else '?'} "
+                    f"queued locally.",
+                    "red", level=logging.WARNING,
+                )
             return
         max_items = int(self.dist_cfg.push_chunk)
         # Bounded per call: a backlog must never starve the heartbeat, which is the ONLY
@@ -373,8 +409,33 @@ class ActorComms:
             # Undelivered stats go back to the front of the queue for the next tick.
             for s in reversed(stats):
                 self._stats.appendleft(s)
+            # The heartbeat is the ONLY way the actor learns the learner's
+            # phase, so a failed one means `self.status` - and therefore
+            # `self.phase` - is now STALE. Silence here is what let an actor sit
+            # in PHASE_INIT for 68 s while the learner trained and exited: the
+            # actor had no idea the learner had ever moved on.
+            self.n_heartbeat_failures += 1
+            stale_s = time.monotonic() - self._last_status_t
+            if time.monotonic() - self._last_stale_warn > 10:
+                self._last_stale_warn = time.monotonic()
+                _say(
+                    f"[actor] HEARTBEAT FAILED ({self.n_heartbeat_failures} in a row). "
+                    f"Learner status is {stale_s:.0f}s stale, so phase is still "
+                    f"{self.phase!r} and the actor will NOT act on anything newer. "
+                    f"Check the REQ/REP channel to {self.dist_cfg.ip}:{self.dist_cfg.port}.",
+                    "red", level=logging.WARNING,
+                )
             return
+
+        if self.n_heartbeat_failures:
+            _say(f"[actor] heartbeat recovered after {self.n_heartbeat_failures} failure(s)",
+                 "green")
+            self.n_heartbeat_failures = 0
+        prev_phase = self.status.get("phase")
         self.status = res
+        self._last_status_t = time.monotonic()
+        if res.get("phase") != prev_phase:
+            _say(f"[actor] learner phase: {prev_phase} -> {res.get('phase')}", "cyan")
         learner_session = res.get("learner_session")
         if (
             self._spec is not None
