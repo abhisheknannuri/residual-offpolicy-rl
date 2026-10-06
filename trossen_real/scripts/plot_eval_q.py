@@ -26,10 +26,16 @@ for all 41 runs.
 Runs are grouped by checkpoint, because comparing Q across checkpoints is
 meaningless - a critic's absolute scale is arbitrary and drifts with training.
 
-PLOT STYLE follows `resfit/rl_finetuning/utils/evaluate_dexmg.py`
-(`_create_q_trajectory_plots`, logged to W&B as `value/q_trajectories`):
-green for success, red for failure, plus a distribution across episode
-progress.
+THE PLOT IS RESFIT'S, NOT A NEW ONE
+-----------------------------------
+`_create_q_trajectory_plots` from `resfit/rl_finetuning/utils/evaluate_dexmg.py`
+is copied verbatim into `_resfit_q_plot.py` - extracted with `ast`, verified
+byte-identical, and checked again on every run. It is nested inside
+`run_dexmg_evaluation()` so it cannot be imported.
+
+That means these figures are the SAME figures the training-time evaluation
+produces, with the same file names, the same JSON payload, and the same W&B
+key: `value/q_trajectories`. Nothing here draws its own plot.
 
 USAGE
 -----
@@ -43,22 +49,17 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import matplotlib
+import numpy as np
 
-matplotlib.use("Agg")                      # no display on the rig
-import matplotlib.pyplot as plt            # noqa: E402
-import numpy as np                         # noqa: E402
+from trossen_real.scripts._resfit_q_plot import _create_q_trajectory_plots, verify
 
 logger = logging.getLogger(__name__)
-
-SUCCESS_COLOR = "#2e7d32"
-FAILURE_COLOR = "#c62828"
-
 
 @dataclass
 class EvalRun:
@@ -144,233 +145,56 @@ def join(runs: list[EvalRun], ticks: list[dict[str, Any]]) -> None:
             [t.get("residual_abs_max", np.nan) for t in window], dtype=float)
 
 
-def _normalised(traj: np.ndarray, n: int = 100) -> np.ndarray:
-    """Resample a trajectory onto a common 0-100% progress axis."""
-    if len(traj) < 2:
-        return np.full(n, traj[0] if len(traj) else np.nan)
-    return np.interp(np.linspace(0, 1, n), np.linspace(0, 1, len(traj)), traj)
+def plot_checkpoint(runs: list[EvalRun], checkpoint: str, out_dir: Path,
+                    global_step: int | None) -> dict[str, Any]:
+    """Call resfit's own plotter, and save its JSON the way resfit does.
 
+    No second plot, no reinterpretation. `_create_q_trajectory_plots` is copied
+    verbatim in `_resfit_q_plot.py` (verified byte-identical), so the figure is
+    the same one the training-time evaluation produces and logs to W&B as
+    `value/q_trajectories`.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    step_tag = global_step if global_step is not None else "NA"
+    plot_path = out_dir / f"eval_q_trajectories_{checkpoint}_step_{step_tag}.png"
+    data_path = out_dir / f"eval_q_trajectories_{checkpoint}_step_{step_tag}.json"
 
-def plot_checkpoint(runs: list[EvalRun], checkpoint: str, out: Path) -> dict[str, Any]:
-    """The six-panel figure for one checkpoint. Returns the summary stats."""
-    succ = [r for r in runs if r.success]
-    fail = [r for r in runs if not r.success]
+    trajectories = [r.q_mean.tolist() for r in runs]
+    lengths = [r.n_ticks for r in runs]
+    successes = [r.success for r in runs]
 
-    fig, axes = plt.subplots(3, 2, figsize=(16, 14))
-    fig.suptitle(
-        f"Residual-RL critic diagnostics - {checkpoint}\n"
-        f"{len(runs)} runs: {len(succ)} success, {len(fail)} failure",
-        fontsize=14, fontweight="bold")
-    ax = axes.ravel()
+    _create_q_trajectory_plots(
+        trajectories=trajectories,
+        episode_lengths=lengths,
+        successes=successes,
+        output_path=plot_path,
+        global_step=global_step,
+    )
 
-    # -- 1. every Q trajectory, green/red --------------------------------
-    for i, r in enumerate(fail):
-        ax[0].plot(r.q_mean, color=FAILURE_COLOR, alpha=0.45, linewidth=1,
-                   label="Failure" if i == 0 else "")
-    for i, r in enumerate(succ):
-        ax[0].plot(r.q_mean, color=SUCCESS_COLOR, alpha=0.85, linewidth=1.6,
-                   label="Success" if i == 0 else "")
-    ax[0].set_xlabel("Episode step")
-    ax[0].set_ylabel("Q (mean over critic heads)")
-    ax[0].set_title("Q trajectories")
-    ax[0].grid(alpha=0.3)
-    if runs:
-        ax[0].legend(loc="best")
+    # resfit's dump_data shape, so anything that reads one reads the other.
+    # `pose` is the only addition - these are real evaluation poses, not
+    # simulator episodes, and without it a trajectory cannot be traced back.
+    data_path.write_text(json.dumps({
+        "global_step": global_step,
+        "episodes": [
+            {
+                "episode_idx": i + 1,
+                "success": successes[i],
+                "length": lengths[i],
+                "q_trajectory": trajectories[i],
+                "pose": runs[i].pose,
+                "run_id": runs[i].run_id,
+                "furthest_stage": runs[i].stage,
+            }
+            for i in range(len(successes))
+        ],
+    }, indent=2))
 
-    # -- 2. mean +/- 1 sd band on a common progress axis -----------------
-    for group, color, name in ((succ, SUCCESS_COLOR, "Success"),
-                               (fail, FAILURE_COLOR, "Failure")):
-        if not group:
-            continue
-        stack = np.vstack([_normalised(r.q_mean) for r in group])
-        m, s = stack.mean(0), stack.std(0)
-        x = np.linspace(0, 100, stack.shape[1])
-        ax[1].plot(x, m, color=color, linewidth=2, label=f"{name} (n={len(group)})")
-        ax[1].fill_between(x, m - s, m + s, color=color, alpha=0.18)
-    ax[1].set_xlabel("Episode progress (%)")
-    ax[1].set_ylabel("Q")
-    ax[1].set_title("Mean Q +/- 1 sd, time-normalised\n"
-                    "A separation here is the critic discriminating")
-    ax[1].grid(alpha=0.3)
-    ax[1].legend(loc="best")
-
-    # -- 3. distribution at progress points (the reference box plot) -----
-    points = [0.25, 0.5, 0.75, 1.0]
-    pos, data, colors = [], [], []
-    for j, p in enumerate(points):
-        for k, (group, color) in enumerate(((succ, SUCCESS_COLOR),
-                                            (fail, FAILURE_COLOR))):
-            vals = [r.q_mean[min(int(p * len(r.q_mean)), len(r.q_mean) - 1)]
-                    for r in group if r.n_ticks]
-            if vals:
-                data.append(vals)
-                pos.append(j * 3 + k)
-                colors.append(color)
-    if data:
-        bp = ax[2].boxplot(data, positions=pos, widths=0.8, patch_artist=True,
-                           medianprops={"color": "black"})
-        for patch, c in zip(bp["boxes"], colors):
-            patch.set_facecolor(c)
-            patch.set_alpha(0.55)
-    ax[2].set_xticks([j * 3 + 0.5 for j in range(len(points))])
-    ax[2].set_xticklabels([f"{int(p * 100)}%" for p in points])
-    ax[2].set_xlabel("Episode progress")
-    ax[2].set_ylabel("Q")
-    ax[2].set_title("Q distribution by progress (green=success, red=failure)")
-    ax[2].grid(alpha=0.3, axis="y")
-
-    # -- 4. terminal Q, the sharpest single diagnostic -------------------
-    term_s = [float(r.q_mean[-1]) for r in succ if r.n_ticks]
-    term_f = [float(r.q_mean[-1]) for r in fail if r.n_ticks]
-    bins = 20
-    if term_s or term_f:
-        lo = min(term_s + term_f)
-        hi = max(term_s + term_f)
-        edges = np.linspace(lo, hi, bins + 1) if hi > lo else bins
-        if term_f:
-            ax[3].hist(term_f, bins=edges, color=FAILURE_COLOR, alpha=0.6,
-                       label=f"Failure (n={len(term_f)})")
-        if term_s:
-            ax[3].hist(term_s, bins=edges, color=SUCCESS_COLOR, alpha=0.75,
-                       label=f"Success (n={len(term_s)})")
-    ax[3].set_xlabel("Q at the final step")
-    ax[3].set_ylabel("Runs")
-    ax[3].axvline(0.99, color="black", linestyle=":", linewidth=1.2)
-    ax[3].text(0.99, ax[3].get_ylim()[1] * 0.96, " Q=0.99", fontsize=8, va="top")
-    ax[3].set_title("Terminal Q distribution\n"
-                    "Overlapping histograms = the critic cannot tell them apart")
-    ax[3].grid(alpha=0.3, axis="y")
-    if term_s or term_f:
-        ax[3].legend(loc="best")
-
-    # -- 5. mean Q per run against the stage actually reached ------------
-    stages = sorted({r.stage for r in runs if r.stage is not None})
-    for st in stages:
-        group = [r for r in runs if r.stage == st and r.n_ticks]
-        if not group:
-            continue
-        xs = np.full(len(group), st, dtype=float)
-        xs += np.random.default_rng(0).uniform(-0.12, 0.12, len(group))
-        ys = [float(r.q_mean.mean()) for r in group]
-        cs = [SUCCESS_COLOR if r.success else FAILURE_COLOR for r in group]
-        ax[4].scatter(xs, ys, c=cs, alpha=0.8, s=45, edgecolors="none")
-    ax[4].set_xlabel("Furthest stage reached")
-    ax[4].set_ylabel("Mean Q over the run")
-    ax[4].set_title("Mean Q vs stage reached\n"
-                    "An upward trend means Q tracks real progress")
-    ax[4].set_xticks(stages)
-    ax[4].grid(alpha=0.3)
-
-    # -- 6. critic ensemble disagreement --------------------------------
-    for group, color, name in ((succ, SUCCESS_COLOR, "Success"),
-                               (fail, FAILURE_COLOR, "Failure")):
-        vals = [float(np.nanmean(r.q_std)) for r in group
-                if r.n_ticks and not np.all(np.isnan(r.q_std))]
-        if vals:
-            ax[5].hist(vals, bins=15, color=color, alpha=0.6,
-                       label=f"{name} (n={len(vals)})")
-    ax[5].set_xlabel("Mean sd across critic heads")
-    ax[5].set_ylabel("Runs")
-    ax[5].set_title("Ensemble disagreement\n"
-                    "High sd = out-of-distribution states the critic is unsure about")
-    ax[5].grid(alpha=0.3, axis="y")
-    if ax[5].get_legend_handles_labels()[0]:
-        ax[5].legend(loc="best")
-
-    fig.tight_layout(rect=(0, 0, 1, 0.96))
-    out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=140, bbox_inches="tight")
-    plt.close(fig)
-
-    return _stats(checkpoint, runs, succ, fail, term_s, term_f)
-
-
-def _stats(checkpoint: str, runs: list[EvalRun], succ: list[EvalRun],
-           fail: list[EvalRun], term_s: list[float],
-           term_f: list[float]) -> dict[str, Any]:
-    """The numbers behind the figure, so a verdict is not eyeballed."""
-    def arr(xs):
-        return np.array(xs, dtype=float) if xs else np.array([np.nan])
-
-    mean_s = arr([float(r.q_mean.mean()) for r in succ if r.n_ticks])
-    mean_f = arr([float(r.q_mean.mean()) for r in fail if r.n_ticks])
-
-    # Separation in units of the pooled spread. Cohen's d: how far apart the
-    # two groups are relative to how wide they each are. |d| < 0.2 is
-    # negligible, > 0.8 is large.
-    pooled = np.sqrt((np.nanvar(mean_s) + np.nanvar(mean_f)) / 2)
-    d = float((np.nanmean(mean_s) - np.nanmean(mean_f)) / pooled) if pooled > 0 else float("nan")
-
-    # AUC via the Mann-Whitney relation: the probability that a randomly
-    # chosen success scores above a randomly chosen failure. 0.5 is chance,
-    # which is exactly what an uninformative critic produces.
-    auc = float("nan")
-    if len(term_s) and len(term_f):
-        wins = sum((a > b) + 0.5 * (a == b) for a in term_s for b in term_f)
-        auc = wins / (len(term_s) * len(term_f))
-
-    # Over-optimism. Q saturates at ~1.0 (sparse 0/1 reward, discounted), so
-    # "Q reached 0.99" means the critic became confident the task was about to
-    # be solved. Counting how often that happened on runs that then FAILED is
-    # the sharpest single number here: a critic can discriminate at the final
-    # step and still be confidently wrong throughout.
-    conf_fail = sum(1 for r in fail if r.n_ticks and float(r.q_mean.max()) >= 0.99)
-    conf_succ = sum(1 for r in succ if r.n_ticks and float(r.q_mean.max()) >= 0.99)
-
-    return {
-        "checkpoint": checkpoint,
-        "n_runs": len(runs), "n_success": len(succ), "n_failure": len(fail),
-        "failures_reaching_q99": conf_fail,
-        "frac_failures_reaching_q99": conf_fail / len(fail) if fail else float("nan"),
-        "successes_reaching_q99": conf_succ,
-        "q_mean_success": float(np.nanmean(mean_s)),
-        "q_mean_failure": float(np.nanmean(mean_f)),
-        "q_terminal_success": float(np.nanmean(arr(term_s))),
-        "q_terminal_failure": float(np.nanmean(arr(term_f))),
-        "cohens_d_mean_q": d,
-        "auc_terminal_q": auc,
-        "total_ticks": int(sum(r.n_ticks for r in runs)),
-    }
-
-
-def verdict(s: dict[str, Any]) -> list[str]:
-    """Say what the numbers mean, rather than leaving it to a glance."""
-    out = []
-    auc, d = s["auc_terminal_q"], s["cohens_d_mean_q"]
-    if s["n_success"] == 0:
-        return ["  NO SUCCESSFUL RUNS - nothing to separate against. The plots "
-                "show the Q range but cannot say whether the critic discriminates."]
-    if s["n_success"] < 5:
-        out.append(f"  CAUTION: only {s['n_success']} successful run(s). Every "
-                   f"number below is noisy at that sample size.")
-    if not np.isnan(auc):
-        if auc >= 0.75:
-            out.append(f"  AUC {auc:.2f} - terminal Q separates success from failure well.")
-        elif auc >= 0.6:
-            out.append(f"  AUC {auc:.2f} - weak but non-trivial separation.")
-        elif auc >= 0.4:
-            out.append(f"  AUC {auc:.2f} - AT CHANCE. The critic's terminal Q does "
-                       f"not distinguish a success from a failure.")
-        else:
-            out.append(f"  AUC {auc:.2f} - INVERTED: failures score HIGHER than "
-                       f"successes. Worse than uninformative.")
-    if not np.isnan(d):
-        out.append(f"  Cohen's d {d:+.2f} on mean Q "
-                   f"({'negligible' if abs(d) < 0.2 else 'small' if abs(d) < 0.5 else 'medium' if abs(d) < 0.8 else 'large'}).")
-
-    frac = s.get("frac_failures_reaching_q99", float("nan"))
-    if not np.isnan(frac):
-        n, tot = s["failures_reaching_q99"], s["n_failure"]
-        if frac >= 0.3:
-            out.append(f"  OVER-OPTIMISTIC: {n}/{tot} failures ({frac:.0%}) still "
-                       f"reached Q >= 0.99 - the critic became confident the task "
-                       f"was about to be solved on runs that did not solve it.")
-        elif frac > 0:
-            out.append(f"  {n}/{tot} failures ({frac:.0%}) reached Q >= 0.99.")
-        else:
-            out.append("  No failure reached Q >= 0.99 - the critic reserves high "
-                       "confidence for runs that succeed.")
-    return out
+    return {"checkpoint": checkpoint, "global_step": global_step,
+            "n_runs": len(runs), "n_success": sum(successes),
+            "n_failure": len(runs) - sum(successes),
+            "total_ticks": int(sum(lengths)),
+            "plot": str(plot_path), "data": str(data_path)}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -435,45 +259,38 @@ def main(argv: list[str] | None = None) -> int:
         if r.n_ticks:
             by_ckpt.setdefault(r.checkpoint, []).append(r)
 
+    if not verify(repo):
+        print("\n  WARNING: the copy of _create_q_trajectory_plots no longer "
+              "matches resfit. Re-extract it.", file=sys.stderr)
+
     all_stats = []
     for ckpt, group in sorted(by_ckpt.items()):
-        out_dir = eval_dir / ckpt
-        png = out_dir / "q_diagnostics.png"
-        stats = plot_checkpoint(group, ckpt, png)
+        # The checkpoint directories are named ..._offline_step_90000, so the
+        # trailing number is the global step resfit's plot title expects.
+        m = re.search(r"(\d+)$", ckpt)
+        step = int(m.group(1)) if m else None
+
+        stats = plot_checkpoint(group, ckpt, eval_dir / ckpt, step)
         all_stats.append(stats)
 
-        (out_dir / "q_stats.json").write_text(json.dumps(stats, indent=2))
-        # The raw joined series, so any other plot can be made without
-        # re-doing the time-window join.
-        (out_dir / "q_trajectories.json").write_text(json.dumps({
-            "checkpoint": ckpt,
-            "runs": [{"run_id": r.run_id, "pose": r.pose, "success": r.success,
-                      "stage": r.stage, "steps": r.steps,
-                      "stop_reason": r.stop_reason,
-                      "q_mean": [round(v, 6) for v in r.q_mean.tolist()]}
-                     for r in group],
-        }, indent=2))
-
         print(f"\n=== {ckpt} ===")
-        print(f"  {stats['n_runs']} runs ({stats['n_success']} success), "
-              f"{stats['total_ticks']} ticks")
-        print(f"  mean Q      success {stats['q_mean_success']:+.3f}   "
-              f"failure {stats['q_mean_failure']:+.3f}")
-        print(f"  terminal Q  success {stats['q_terminal_success']:+.3f}   "
-              f"failure {stats['q_terminal_failure']:+.3f}")
-        print(f"  failures reaching Q>=0.99: {stats['failures_reaching_q99']}"
-              f"/{stats['n_failure']}")
-        for line in verdict(stats):
-            print(line)
-        print(f"  -> {png}")
+        print(f"  {stats['n_runs']} runs ({stats['n_success']} success, "
+              f"{stats['n_failure']} failure), {stats['total_ticks']} ticks")
+        print(f"  -> {stats['plot']}")
+        print(f"  -> {stats['data']}")
 
     if args.wandb:
-        _to_wandb(args.wandb_project, eval_dir, by_ckpt, all_stats)
+        _to_wandb(args.wandb_project, eval_dir, all_stats)
     return 0
 
 
-def _to_wandb(project: str, eval_dir: Path, by_ckpt: dict[str, list[EvalRun]],
-              all_stats: list[dict[str, Any]]) -> None:
+def _to_wandb(project: str, eval_dir: Path, all_stats: list[dict[str, Any]]) -> None:
+    """Log exactly as resfit does: the image under `value/q_trajectories`.
+
+    `evaluate_dexmg.py` sets `metrics["value/q_trajectories"] = wandb.Image(...)`
+    and `wandb.save()`s the JSON alongside it. Same key, same two artefacts, so
+    these eval plots land where the training-time ones already are.
+    """
     try:
         import wandb
     except ImportError:
@@ -483,13 +300,11 @@ def _to_wandb(project: str, eval_dir: Path, by_ckpt: dict[str, list[EvalRun]],
         ckpt = stats["checkpoint"]
         run = wandb.init(project=project, name=f"{eval_dir.name}_{ckpt}",
                          config=stats, reinit=True)
-        # `value/` to match evaluate_dexmg.py, which logs its Q plot as
-        # `value/q_trajectories`.
-        run.log({"value/q_diagnostics": wandb.Image(str(eval_dir / ckpt / "q_diagnostics.png")),
-                 **{f"value/{k}": v for k, v in stats.items()
-                    if isinstance(v, (int, float))}})
+        run.log({"value/q_trajectories": wandb.Image(stats["plot"])},
+                step=stats["global_step"])
+        run.save(stats["data"], base_path=str(eval_dir))
         run.finish()
-    print("\nlogged to W&B")
+        print(f"  logged {ckpt} -> value/q_trajectories")
 
 
 if __name__ == "__main__":
