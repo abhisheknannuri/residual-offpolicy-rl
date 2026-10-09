@@ -404,7 +404,10 @@ def api_connect():
                 pedal = PedalListener()
             if enable_intervention:
                 try:
-                    leader = TrossenSingleLeader(config.leader_ips["single"])
+                    leader = TrossenSingleLeader(
+                        config.leader_ips["single"],
+                        gripper_bounds=(config.control.gripper_closed, config.control.gripper_open),
+                    )
                     leader.connect()
                 except Exception as exc:
                     cameras.stop()

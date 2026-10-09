@@ -126,7 +126,10 @@ def main() -> None:
     leader = None
     pedal = None
     if args.enable_intervention:
-        leader = TrossenSingleLeader(station_config.leader_ips["single"])
+        leader = TrossenSingleLeader(
+            station_config.leader_ips["single"],
+            gripper_bounds=(station_config.control.gripper_closed, station_config.control.gripper_open),
+        )
         leader.connect()
         pedal = PedalListener()
         print("Intervention ENABLED - leader + pedal connected.")

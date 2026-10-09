@@ -676,7 +676,13 @@ def _make_get_envs(cfg):
                                 "(enable_intervention=true). If this is the last "
                                 "line you see, the leader is not reachable.",
                                 station_config.leader_ips["single"])
-                    leader = TrossenSingleLeader(station_config.leader_ips["single"])
+                    leader = TrossenSingleLeader(
+                        station_config.leader_ips["single"],
+                        gripper_bounds=(
+                            station_config.control.gripper_closed,
+                            station_config.control.gripper_open,
+                        ),
+                    )
                     leader.connect()
                     logger.info("[env] 3d: leader connected")
                 except Exception as exc:

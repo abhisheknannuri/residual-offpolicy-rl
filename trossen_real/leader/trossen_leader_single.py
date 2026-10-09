@@ -36,9 +36,15 @@ class TrossenSingleLeader:
     Can operate in freedrive (for human teleop) or position mode (to mirror a policy).
     """
 
-    def __init__(self, ip: str, start_in_freedrive: bool = True) -> None:
+    def __init__(
+        self,
+        ip: str,
+        start_in_freedrive: bool = True,
+        gripper_bounds: tuple[float, float] = (0.004, 0.04),
+    ) -> None:
         self.ip = ip
         self.start_in_freedrive = start_in_freedrive
+        self._gripper_bounds = (min(gripper_bounds), max(gripper_bounds))
         self._arm: RealArm | MockArm | None = None
         self._prev_pose: np.ndarray | None = None
         self._current_mode: str | None = None
@@ -86,7 +92,8 @@ class TrossenSingleLeader:
                 logger.exception("Error switching leader to position mode before parking; disconnecting anyway.")
             for waypoint in park_waypoints:
                 try:
-                    self._arm.set_joint_positions(waypoint, goal_time=goal_time, blocking=True)
+                    safe_waypoint = self._clip_gripper(waypoint)
+                    self._arm.set_joint_positions(safe_waypoint, goal_time=goal_time, blocking=True)
                 except Exception:
                     logger.exception("Error moving leader to a park waypoint; continuing with remaining waypoints.")
         self._arm.disconnect()
@@ -118,7 +125,7 @@ class TrossenSingleLeader:
         """
         if self._arm is None:
             return
-        self._arm.set_joint_positions(list(joint_positions), goal_time=goal_time, blocking=blocking)
+        self._arm.set_joint_positions(self._clip_gripper(joint_positions), goal_time=goal_time, blocking=blocking)
 
     def get_cartesian_positions(self) -> np.ndarray:
         return self._arm.get_cartesian_positions()
@@ -194,7 +201,12 @@ class TrossenSingleLeader:
         synced pose.
         """
         self.set_position_mode()
-        self._arm.set_joint_positions(list(joint_positions), goal_time=goal_time, blocking=True)
+        self._arm.set_joint_positions(self._clip_gripper(joint_positions), goal_time=goal_time, blocking=True)
         if end_in_freedrive:
             self.set_freedrive_mode()
+
+    def _clip_gripper(self, joint_positions: list[float]) -> list[float]:
+        safe_positions = list(joint_positions)
+        safe_positions[6] = float(np.clip(safe_positions[6], *self._gripper_bounds))
+        return safe_positions
 

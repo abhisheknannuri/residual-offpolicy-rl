@@ -129,7 +129,10 @@ def api_connect():
             if config.arm_mode != "single":
                 return jsonify(error=f"Only arm_mode: single is supported for now (got '{config.arm_mode}')."), 400
 
-            leader = TrossenSingleLeader(config.leader_ips["single"])
+            leader = TrossenSingleLeader(
+                config.leader_ips["single"],
+                gripper_bounds=(config.control.gripper_closed, config.control.gripper_open),
+            )
             leader.connect()
 
             follower = FollowerClient(config.follower_server_url)

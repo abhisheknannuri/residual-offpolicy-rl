@@ -82,7 +82,7 @@ ee_bounds:
 #      there via EE-pose (cartesian) control - never joint control.
 reset:
   single:
-    staged_joint_positions: [0.0, 1.5707963267948966, 1.5707963267948966, -1.5707963267948966, 0.0, 0.0, 0.044]
+    staged_joint_positions: [0.0, 1.5707963267948966, 1.5707963267948966, -1.5707963267948966, 0.0, 0.0, 0.040]
     randomize_ee: false
     xyz_offset: [0.025, 0.025, 0.025]
     randomize_angles: false
