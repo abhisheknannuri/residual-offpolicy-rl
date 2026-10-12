@@ -24,7 +24,7 @@ cameras:
     # serial: RealSense serial number. Leave "" to force a synthetic mock
     # feed for that slot (useful for developing/testing without hardware).
     - name: cam_high
-      serial: ""
+      serial: "420222071698"
     - name: cam_right_wrist
       serial: "230322273819"
     - name: cam_left_wrist

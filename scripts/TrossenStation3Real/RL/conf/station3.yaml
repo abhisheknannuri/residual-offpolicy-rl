@@ -246,7 +246,27 @@ real_settle_time_s: 2.0
 # true = leader arm + foot pedal can take over mid-episode; those
 # transitions are stored with intervened=True.
 enable_intervention: true
-real_log_file: null
+# Per-step diagnostic log written by TrossenResidualEnv (one JSON object per
+# env.step(), no images). It is the ONLY place the actor's own residual is kept
+# on intervened steps - the replay buffer stores just the executed action.
+# Each line has: step, intervened, reward, terminated, truncated, buffer_done,
+# stop_reason, executed_action (absolute joint target, real units),
+# stored_naction (what went into the buffer), actor_proposed_action
+# (clamp(base+residual), normalized), residual_naction (raw actor output incl.
+# noise, normalized), follower_state_before/after, achieved_hz.
+#
+# Value: a FILE path (not a folder), extension .jsonl. Use an absolute path.
+# The parent folder is created if missing. The file is opened in APPEND mode,
+# so give every run its own name or resumed runs pile into one file.
+# Only the machine running the env writes it - in distributed mode that is the
+# ACTOR (laptop), so the path must exist on the laptop. It is excluded from the
+# actor/learner config fingerprint, so setting it on the actor only is fine:
+#     ./agentlace/04_online_rl_from_checkpoint_actor.sh \
+#         real_log_file=/home/qte9489/personal_abhi/temp/residual-offpolicy-rl/RealTrainLogs/station3_online_2026-10-12_run1.jsonl
+# Or set it here:
+#     real_log_file: /home/qte9489/personal_abhi/temp/residual-offpolicy-rl/RealTrainLogs/station3_online_2026-10-12_run1.jsonl
+# null = no log.
+real_log_file: /home/qte9489/personal_abhi/temp/residual-offpolicy-rl/RealTrainLogs/station3_online_2026-10-12_run1.jsonl
 
 # --- how we talk to policy_server.py -----------------------------------------
 # These apply EVERYWHERE the base policy is queried - the offline buffer build,
