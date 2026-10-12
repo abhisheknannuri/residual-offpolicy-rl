@@ -133,6 +133,12 @@ class TrossenResidualEnv:
         # hardware builds everything from numpy (camera/robot readouts), which defaults
         # to CPU unless moved explicitly.
         self.device = getattr(action_scaler, "device", torch.device("cpu"))
+        # Executable box for base + residual (normalized): +-1 on joints, the gripper's
+        # physical range on dim 6. The SAME bounds QAgent.set_action_bounds() gets in the
+        # trainer, so rollout, critic target and actor loss all combine identically.
+        self._act_low, self._act_high = action_scaler.normalized_bounds(
+            (control.gripper_closed, control.gripper_open)
+        )
         # Optional per-step JSONL diagnostic log (everything EXCEPT images - reward,
         # terminated/truncated, intervened flag, real-units executed action, normalized
         # stored/proposed actions, raw follower state, achieved Hz). NOT a substitute for
@@ -263,7 +269,9 @@ class TrossenResidualEnv:
         #    anything else, so a release-edge reset takes effect before predict() below.
         intervened_now = self.intervention.tick() if self.intervention is not None else False
 
-        combined_naction = torch.clamp(self._last_base_naction + residual_naction, -1.0, 1.0)
+        combined_naction = torch.max(
+            torch.min(self._last_base_naction + residual_naction, self._act_high), self._act_low
+        )
         follower_state_before = self.follower.get_state()
 
         if intervened_now:
@@ -314,7 +322,11 @@ class TrossenResidualEnv:
                 self.action_space_name, env_action, follower_state_before,
                 gripper_bounds=(self.control.gripper_closed, self.control.gripper_open),
             )
-            stored_naction = combined_naction
+            # Store what was EXECUTED, not what was proposed: reconstruct_absolute_action()
+            # clips the gripper to [gripper_closed, gripper_open], which combined_naction
+            # alone does not guarantee. Joints 0-5 come back identical up to float error.
+            # Same conversion the intervention branch uses.
+            stored_naction = self._to_stored_naction(executed_action, follower_state_before)
             if self.intervention is not None:
                 self.intervention.mirror_to_leader(executed_action, self.control.goal_time_s)
 
@@ -497,7 +509,7 @@ class TrossenResidualEnv:
         return augmented
 
     def _to_stored_naction(self, executed_action: np.ndarray, follower_state_before: dict) -> torch.Tensor:
-        """The human's REAL, physically-executed combined action, converted to
+        """The REAL, physically-executed action (human or autonomous), converted to
         the SAME per-frame delta/normalized convention every other transition
         uses (matches `convert_to_delta_joint_dataset.py`'s exact convention).
         Only clipped to [-1,1] (via `action_scaler.scale()`), NEVER to

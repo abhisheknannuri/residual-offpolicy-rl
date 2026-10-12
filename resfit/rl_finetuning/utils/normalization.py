@@ -172,6 +172,23 @@ class ActionScaler:
         # Unscale back to original range
         return action_min + (scaled_clamped + 1.0) * (action_max - action_min) / 2.0
 
+    def normalized_bounds(
+        self, gripper_bounds: tuple[float, float] | None = None, gripper_dim: int = 6
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Per-dim [low, high] of an EXECUTABLE action in normalized space.
+
+        +-1 on every dim, except the gripper, which the robot clips to its physical
+        range - so normalized values beyond scale(gripper_closed/open) all execute
+        identically. Derived from this scaler's own limits, never hardcoded.
+        """
+        low = torch.full_like(self._limits.min, -1.0)
+        high = torch.full_like(self._limits.max, 1.0)
+        if gripper_bounds is not None:
+            g = torch.tensor(sorted(gripper_bounds), dtype=torch.float32, device=self.device)
+            g_n = 2.0 * (g - self._limits.min[gripper_dim]) / self._range[gripper_dim] - 1.0
+            low[gripper_dim], high[gripper_dim] = g_n[0], g_n[1]
+        return low, high
+
     def to(self, device: torch.device | str) -> ActionScaler:
         """Move scaler to a different device."""
         new_scaler = ActionScaler.__new__(ActionScaler)

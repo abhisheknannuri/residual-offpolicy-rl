@@ -906,6 +906,14 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
         residual_actor=True,
     )
 
+    if cfg.real_hardware:
+        # The robot clips the gripper to its physical range, so bound the agent's own
+        # combined actions (critic target, actor loss) to what can actually execute.
+        from trossen_real.config import load_station_config
+
+        _ctl = load_station_config(cfg.station_config_name).control
+        agent.set_action_bounds(*action_scaler.normalized_bounds((_ctl.gripper_closed, _ctl.gripper_open)))
+
     # ↓↓↓ verbatim from train_residual_td3.py:791-797
     # Set up actor learning rate warmup
     actor_updates = 0

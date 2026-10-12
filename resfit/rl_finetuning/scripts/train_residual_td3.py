@@ -869,6 +869,14 @@ def main(cfg: ResidualTD3DexmgConfig):
         cfg=cfg.agent,
         residual_actor=True,  # Enable residual actor mode
     )
+
+    if cfg.real_hardware:
+        # The robot clips the gripper to its physical range, so bound the agent's own
+        # combined actions (critic target, actor loss) to what can actually execute.
+        from trossen_real.config import load_station_config
+
+        _ctl = load_station_config(cfg.station_config_name).control
+        agent.set_action_bounds(*action_scaler.normalized_bounds((_ctl.gripper_closed, _ctl.gripper_open)))
     # get_envs()'s real_hardware branch sets TrossenResidualEnv's own horizon to
     # cfg.real_max_steps (no `horizon=` override is passed for the training env, only
     # for the eval env) - mirror that directly when there's no env object to read it off.

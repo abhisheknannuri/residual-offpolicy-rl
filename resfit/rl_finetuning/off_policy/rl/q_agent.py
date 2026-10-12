@@ -85,6 +85,12 @@ class QAgent(nn.Module):
         )
         self.actor = Actor(repr_dim, patch_repr_dim, prop_dim, action_dim, cfg.actor, residual_actor=residual_actor)
 
+        # Per-dim bounds of an executable combined action (normalized). None = ResFiT's
+        # original +-1 on every dim. Plain attributes, NOT buffers, so checkpoint
+        # state_dict keys are unchanged and old checkpoints still load.
+        self._act_low: torch.Tensor | None = None
+        self._act_high: torch.Tensor | None = None
+
         self.critic_target = copy.deepcopy(self.critic)
         self.actor_target = copy.deepcopy(self.actor)
 
@@ -248,6 +254,18 @@ class QAgent(nn.Module):
                 obs[k] = v.unsqueeze(0)
         return should_unsqueeze
 
+    def set_action_bounds(self, low: torch.Tensor, high: torch.Tensor) -> None:
+        """Narrow the executable combined-action box (e.g. the gripper's physical range,
+        see ActionScaler.normalized_bounds()). Applied in the critic target and actor losses."""
+        self._act_low, self._act_high = low.float(), high.float()
+
+    def _combine(self, base: torch.Tensor, residual: torch.Tensor) -> torch.Tensor:
+        """base + residual, clipped to the executable box (default +-1 on every dim)."""
+        x = base + residual
+        if self._act_low is None:
+            return torch.clamp(x, -1.0, 1.0)
+        return torch.max(torch.min(x, self._act_high.to(x.device)), self._act_low.to(x.device))
+
     def act(self, obs: dict[str, torch.Tensor], *, eval_mode=False, stddev=0.0, cpu=True) -> torch.Tensor:
         """This function takes tensor and returns actions in tensor"""
         assert not self.training
@@ -326,7 +344,7 @@ class QAgent(nn.Module):
             if self.residual_actor:
                 # Current step: 'action' from the replay buffer is the executed combined action
                 # Next step: combine and clamp to match environment execution
-                next_action = torch.clamp(next_obs["observation.base_action"] + next_residual_action, -1.0, 1.0)
+                next_action = self._combine(next_obs["observation.base_action"], next_residual_action)
             else:
                 next_action = next_residual_action
 
@@ -440,7 +458,7 @@ class QAgent(nn.Module):
         if self.residual_actor:
             # Create the full action by combining the base action and the residual action
             # and clamp to the valid range [-1, 1] to match environment execution
-            combined_action = torch.clamp(obs["observation.base_action"] + action_pred, -1.0, 1.0)
+            combined_action = self._combine(obs["observation.base_action"], action_pred)
         else:
             combined_action = action_pred
 
@@ -468,7 +486,7 @@ class QAgent(nn.Module):
 
         # 3. Create the full actions for both the PREDICTION and the DATASET TARGET
         if self.residual_actor:
-            combined_action = torch.clamp(obs["observation.base_action"] + action_pred, -1.0, 1.0)
+            combined_action = self._combine(obs["observation.base_action"], action_pred)
             target_combined_action = target_action  # target_action is ALREADY the full ground truth action!
             
             # To train the BC loss, we must compare the predicted residual (action_pred) 
