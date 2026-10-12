@@ -53,6 +53,7 @@ vs `intervention is None` above, only needs `pedal`:
 
 from __future__ import annotations
 
+import collections
 import logging
 import time
 
@@ -168,6 +169,14 @@ class TrossenResidualEnv:
         self._last_base_naction: torch.Tensor | None = None
         self._step_count = 0
 
+        # Loop pacing (see step()). `_tick_overhead_s` holds recent measurements of the time
+        # between one tick's pacing sleep ending and the next step() starting: the post-sleep
+        # obs read (q_after, cameras, base-policy query) plus the caller's work (agent.act,
+        # buffer add). Median of the last 20, so a single slow outlier cannot starve the sleep.
+        self._tick_overhead_s: collections.deque[float] = collections.deque(maxlen=20)
+        self._last_wake: float | None = None
+        self._prev_step_start: float | None = None
+
         # ------------------------------------------------------------------
         # gym-style spaces, batched with a leading dim of 1 (matches the
         # vectorized sim wrapper's shape convention - `num_envs=1` here - so
@@ -253,12 +262,19 @@ class TrossenResidualEnv:
 
         self._last_base_naction = base_naction
         self._step_count = 0
+        # The reset itself (seconds) must not count as tick overhead or as a tick.
+        self._last_wake = None
+        self._prev_step_start = None
         return obs, {}
 
     def step(
         self, residual_naction: torch.Tensor
     ) -> tuple[dict[str, torch.Tensor], torch.Tensor, torch.Tensor, torch.Tensor, dict]:
         t_start = time.time()
+        if self._last_wake is not None:
+            self._tick_overhead_s.append(t_start - self._last_wake)
+        achieved_hz = 1.0 / (t_start - self._prev_step_start) if self._prev_step_start is not None else None
+        self._prev_step_start = t_start
 
         # Defensive: ensure the caller's residual (agent.act() output, or the warm-up
         # loop's torch.rand(..., device=device)) is on the SAME device as this env's own
@@ -334,10 +350,18 @@ class TrossenResidualEnv:
             executed_action, blocking=False, min_time_to_move=self.control.goal_time_s
         )
 
-        # Hold the target control frequency (same tick-timing pattern as infer_app's InferenceLoop).
+        # Hold the target control frequency over the WHOLE loop, i.e. consecutive step() starts
+        # (and so consecutive move commands) exactly period_s apart, like teleop's control loop
+        # and infer_app's InferenceLoop. This sleep alone only covers the work done so far in
+        # this step(); the next-obs read below and the caller's agent.act()/buffer add happen
+        # after it, so they are subtracted, using the median measured over recent ticks.
+        # Without that the loop ran at ~15.7 Hz instead of 20 Hz (run_2026-10-12_18-47-57):
+        # ~6.5 ms of obs read + ~7 ms of caller work outside the 50 ms budget.
         period_s = 1.0 / max(self.control.frequency_hz, 1)
         elapsed = time.time() - t_start
-        time.sleep(max(0.0, period_s - elapsed))
+        overhead_s = float(np.median(self._tick_overhead_s)) if self._tick_overhead_s else 0.0
+        time.sleep(max(0.0, period_s - elapsed - overhead_s))
+        self._last_wake = time.time()
 
         follower_state_after = self.follower.get_state()
         images = self.cameras.get_all_latest()
@@ -421,7 +445,11 @@ class TrossenResidualEnv:
                 residual_naction=residual_naction.detach().cpu().numpy(),
                 follower_state_before=follower_state_before,
                 follower_state_after=follower_state_after,
-                achieved_hz=1.0 / max(time.time() - t_start, 1e-6),
+                # Full-loop rate: 1 / (this step() start - previous step() start). None on the
+                # first tick after a reset. Before 2026-10-13 this was 1 / (duration of step()
+                # alone), which hid the time spent outside the env.
+                achieved_hz=achieved_hz,
+                tick_overhead_ms=1000.0 * overhead_s,
             )
 
         # Gymnasium (vectorized) autoreset convention - matches sim's vec_env exactly, so
