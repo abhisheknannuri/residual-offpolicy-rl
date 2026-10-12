@@ -223,10 +223,12 @@ class RLPDAlgoConfig:
     stddev_min: Any = 0.1
     stddev_step: int = 300_000
 
-    stddev_schedule: str = field(init=False)
-
-    def __post_init__(self):
-        self.stddev_schedule = f"linear({self.stddev_max},{self.stddev_min},{self.stddev_step})"
+    # An OmegaConf interpolation, resolved lazily when read - i.e. AFTER Hydra has
+    # merged the yaml and CLI overrides, so it always reflects the final
+    # stddev_max/min/step. This used to be computed in __post_init__, which runs on
+    # the dataclass defaults BEFORE the merge, so yaml/CLI values for
+    # stddev_max/min/step were silently ignored (every run got the defaults).
+    stddev_schedule: str = "linear(${.stddev_max},${.stddev_min},${.stddev_step})"
 
 
 # -----------------------------------------------------------------------------

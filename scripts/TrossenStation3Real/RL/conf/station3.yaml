@@ -72,10 +72,30 @@ algo:
   prefetch_batches: 4
   priority_alpha: 0.6
   priority_beta: 0.4
+  # Gaussian noise std on the residual, per joint (6 joints + gripper).
+  # Units: NORMALIZED action space (same as agent.actor.action_scale), NOT
+  # radians; real units = stddev * half_exp (temp/normalization_and_action_flow.md).
+  # The SAME value drives (1) rollout exploration noise and (2) the critic's
+  # target-action noise (target policy smoothing, clipped by agent.stddev_clip).
+  #
+  # Noise at step t = linear interpolation from stddev_max (t=0) to stddev_min
+  # (t >= stddev_step). Each of max/min may be a scalar or a 7-element list.
+  # With max == min (as here) it is a CONSTANT and stddev_step has no effect.
+  # Decay example: stddev_max: 0.05, stddev_min: 0.01, stddev_step: 50000.
+  #
+  # History: before 2026-10-12 these three keys were silently ignored -
+  # stddev_schedule was computed from the code defaults before this yaml was
+  # merged, so every run used a flat 0.05 (e.g. run_2026-10-09_11-00-05).
+  # Fixed by making stddev_schedule an interpolation (config/rlpd.py) and
+  # making utils.schedule() accept lists.
   stddev_max: [0.015, 0.015, 0.015, 0.03, 0.03, 0.03, 0.0125]
   stddev_min: [0.015, 0.015, 0.015, 0.03, 0.03, 0.03, 0.0125]
-  stddev_step: 15000
-  stddev_schedule: linear(0.05,0.05,300000)
+  stddev_step: 300000
+  # Built from the three keys above, resolved AFTER all yaml/CLI merging.
+  # Leave it as this interpolation and edit stddev_max/min/step instead. Only
+  # replace it with a literal (e.g. "[0.01,0.01,0.01,0.01,0.01,0.01,0.01]" or
+  # "linear(0.05,0.01,50000)") if you deliberately want to bypass them.
+  stddev_schedule: "linear(${.stddev_max},${.stddev_min},${.stddev_step})"
   critic_warmup_save_freq: 5000
   # checkpoint the online buffer every N transitions during warm-up.
   # This is what makes a dropped robot connection resumable - without

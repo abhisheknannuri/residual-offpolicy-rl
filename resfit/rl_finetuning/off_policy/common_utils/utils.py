@@ -204,26 +204,42 @@ def to_native_list(val):
             pass
     return val
 
+def _schedule_value(val):
+    """A parsed schedule argument -> float, or float32 array for a per-dim list."""
+    if isinstance(val, (list, tuple)):
+        return np.array(val, dtype=np.float32)
+    return float(val)
+
+
 def schedule(schdl, step):
+    """Evaluate a schedule string at `step`.
+
+    Forms (each value may be a scalar or a per-dim list like [0.015, 0.03]):
+      "0.1" / "[0.015, 0.03]"            constant
+      "linear(init, final, duration)"    linear from init to final over duration steps
+      "step_linear(init, final1, dur1, final2, dur2)"
+
+    The arguments are parsed with ast.literal_eval as one tuple, so lists inside
+    linear(...) work. The previous regex split on every comma and raised
+    ValueError for lists.
+    """
+    schdl = str(schdl).strip()
     try:
-        return parse_float_or_array(str(schdl))
+        return parse_float_or_array(schdl)
     except ValueError:
-        match = re.match(r"linear\((.+),(.+),(.+)\)", schdl)
-        if match:
-            init_str, final_str, duration_str = match.groups()
-            init = parse_float_or_array(init_str)
-            final = parse_float_or_array(final_str)
-            duration = float(duration_str)
+        pass
+    match = re.fullmatch(r"(linear|step_linear)\((.*)\)", schdl)
+    if match:
+        kind, args_str = match.groups()
+        args = ast.literal_eval(f"({args_str},)")
+        if kind == "linear" and len(args) == 3:
+            init, final = _schedule_value(args[0]), _schedule_value(args[1])
+            duration = float(args[2])
             mix = np.clip(step / duration, 0.0, 1.0)
             return (1.0 - mix) * init + mix * final
-        match = re.match(r"step_linear\((.+),(.+),(.+),(.+),(.+)\)", schdl)
-        if match:
-            init_str, final1_str, dur1_str, final2_str, dur2_str = match.groups()
-            init = parse_float_or_array(init_str)
-            final1 = parse_float_or_array(final1_str)
-            final2 = parse_float_or_array(final2_str)
-            duration1 = float(dur1_str)
-            duration2 = float(dur2_str)
+        if kind == "step_linear" and len(args) == 5:
+            init, final1, final2 = _schedule_value(args[0]), _schedule_value(args[1]), _schedule_value(args[3])
+            duration1, duration2 = float(args[2]), float(args[4])
             if step <= duration1:
                 mix = np.clip(step / duration1, 0.0, 1.0)
                 return (1.0 - mix) * init + mix * final1
