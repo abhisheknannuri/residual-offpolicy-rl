@@ -22,6 +22,14 @@ N_ACTION_STEPS="${N_ACTION_STEPS:-20}"
 LR="${LR:-1e-4}"
 WANDB_PROJECT="${WANDB_PROJECT:-Trossen_PickAndInsertCube_Real}"
 
+# GPU to train on. 0 on the laptop (its only GPU); on the server pick one, e.g.
+#   CUDA_DEVICE=1 ./train_act_deltajoint.sh
+# Exported as CUDA_VISIBLE_DEVICES, so inside the run that GPU is cuda:0 and
+# lerobot-train's default --policy.device=cuda uses it.
+CUDA_DEVICE="${CUDA_DEVICE:-0}"
+export CUDA_VISIBLE_DEVICES="${CUDA_DEVICE}"
+
 echo "lerobot : ${LEROBOT_DIR}"
+echo "gpu     : ${CUDA_DEVICE} (CUDA_VISIBLE_DEVICES)"
 echo "data    : ${DATA_DIR}"
 echo "steps   : ${STEPS}  batch ${BATCH_SIZE}  chunk ${CHUNK_SIZE}/${N_ACTION_STEPS}  lr ${LR}"

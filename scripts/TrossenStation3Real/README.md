@@ -106,3 +106,79 @@ trim, so this is consistent with the datasets already trained on.
   `PickCubeAndInsert_Station3_Trial1_old` (213 MB) and
   `..._deltajoint_old` (191 MB) are v2.1 backups, safe to delete once you're
   happy with the v3 outputs.
+
+---
+
+# Iterative training 1 (2026-10-16)
+
+Second ACT round: Trial1 plus the data collected with the Trial1 ACT. Two
+datasets, trained with the **same command and hyper-parameters** as Trial1;
+only the dataset changes. Evaluate both on the robot and keep the better one.
+
+| Dataset (v3, under `trossen_real/datasets/iterativeTraining/TrossenStation3/ACT_Iter1/`) | Episodes | Frames | Contents |
+|---|---|---|---|
+| `PickCubeAndInsert_TS3_Iter1_deltajoint` | 226 | 78,884 | Trial1 (178) + iter1 rollouts (48) |
+| `PickCubeAndInsert_TS3_Iter1_withRecovery_deltajoint` | 273 | 92,381 | the above + 47 recovery segments |
+
+Built by `prepare_dataset_iter1.sh` (a record of what was run, with the
+reasons in comments); recovery cut points by `compute_recovery_keep_from.py`.
+
+## What went in
+
+| Source | Eps | Action taken |
+|---|---|---|
+| `PickCubeAndInsert_Station3_Trial1_deltajoint_old` (v2.1 of the Trial1 delta dataset) | 178 | as-is |
+| `InferData/20261014_113503_PickCubeAndInsert_iter1` (ACT rollouts with HG-DAgger interventions) | 51 → 48 | dropped 3, 13, 34 (failures, no reward pedal); delta-converted |
+| `RecoveryData/20261014_155431_PickCubeAndInsert_RecoveryEpisodes` (teleop) | 51 → 47 | **only the recovery part kept** (below); delta-converted; dataset B only |
+
+Both new sources: `cam_specialist` (added for SARM) is dropped, and so are the
+infer app's `observation.intervened` / `observation.policy_action`, so the
+schema matches Trial1. ACT keeps the same 2 wrist-camera input as Trial1, so
+the trained policy runs with the same inference config.
+
+## Why the recovery episodes are cut
+
+Every recovery episode is a teleop demo of approach → grasp → a
+**deliberately misaligned insert and release** → recovery. Training on whole
+episodes would teach ACT the deliberate failure (tilting and letting go of
+the cube). So each episode is kept only from 0.5 s after its failed release:
+the first frame ACT sees is the cube unseated on the plate with the gripper
+open. The release frame comes from the SARM stage labels (first gripper
+opening during "cube being inserted"); 4 episodes without one are dropped.
+Checked visually at 8 cut points.
+
+What dataset B can still get wrong: the recoveries use several strategies
+(push with closed fingers, re-grasp and slide, lift and re-insert, put the
+cube down on the table and re-grasp). This ACT has `use_vae=false`, so it
+averages conflicting behaviours for the same image. If B is worse than A,
+that is the first suspect; a later round should record one strategy only
+(re-grasp, lift, re-insert).
+
+## Train on the server
+
+Copy both v3 datasets into the server's `DATA_DIR`
+(`/home/qte9489/Research/DatasetUtils/CubePickAndInsert_TrossenReal/Station3_Trial1`
+by default, or set `DATA_DIR`), then:
+
+```bash
+DATASET=PickCubeAndInsert_TS3_Iter1_deltajoint                            ./train_act_deltajoint.sh  # A
+DATASET=PickCubeAndInsert_TS3_Iter1_withRecovery_deltajoint               ./train_act_deltajoint.sh  # B
+DATASET=PickCubeAndInsert_TS3_Iter1_withRecovery_deltajoint USE_VAE=true  ./train_act_deltajoint.sh  # B + CVAE
+```
+
+Runs 1 vs 2 differ only in data, 2 vs 3 only in `use_vae`. The full record
+(every command, the checks, how to do the next iteration) is in
+`trossen_real/datasets/iterativeTraining/TrossenStation3/ACT_Iter1/README.md`.
+
+Checkpoints go to `outputs/train/ACT_BC_<DATASET>`. Same 75k steps, batch 64,
+chunk 20/20, lr 1e-4 as Trial1. With ~43-67% more frames, 75k steps is
+proportionally fewer epochs than Trial1; compare the 50k-75k checkpoints.
+
+## Gotcha found on the way
+
+The visualizer's RL (reward) tab had left `episode_*.parquet.rl_bak` backups
+inside `data/chunk-000/`. lerobot 0.1.0 reads every file in `data/`, so the
+load failed with "timestamps unexpectedly violate the tolerance". They were
+moved to `<dataset>/.rl_backups/`.
+Fixed in the visualizer (`backend/rl/common.py::backup_file`) on 2026-10-16:
+new backups go to `<dataset>/.rl_backups/` directly.

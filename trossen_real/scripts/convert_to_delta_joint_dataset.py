@@ -268,7 +268,9 @@ def _load_action_names_and_validate_joint_mode(ds: LeRobotDataset) -> list[str]:
     return action_names
 
 
-def analyze_episode(ds: LeRobotDataset, ep: int, gripper_mask: np.ndarray, cfg: TrimConfig) -> dict:
+def analyze_episode(
+    ds: LeRobotDataset, ep: int, gripper_mask: np.ndarray, cfg: TrimConfig, keep_from: int = 0
+) -> dict:
     ep_start = int(ds.episode_data_index["from"][ep])
     ep_end = int(ds.episode_data_index["to"][ep])
     actions = np.asarray(ds.hf_dataset[ep_start:ep_end]["action"], dtype=np.float32)
@@ -316,6 +318,13 @@ def analyze_episode(ds: LeRobotDataset, ep: int, gripper_mask: np.ndarray, cfg: 
     # end_cutoff, end_note = compute_end_trim_cutoff(speed, cfg)
     end_cutoff, end_note = 0, ""
 
+    # Explicit per-episode start (--keep-from): drop everything before it.
+    # Used to keep only the recovery part of deliberately-failed episodes.
+    if keep_from > cutoff:
+        if keep_from >= length:
+            raise ValueError(f"episode {ep}: --keep-from {keep_from} >= episode length {length}")
+        cutoff, note = keep_from, f"kept from frame {keep_from} (--keep-from)"
+
     # Combined safety check: if BOTH trims together would eat too much of the
     # episode, prioritize the START trim (dead-time-before-recording-started
     # is the more clearly-understood/common case) and drop the END trim
@@ -347,10 +356,12 @@ def convert_episode(
     gripper_mask: np.ndarray,
     cfg: TrimConfig,
     passthrough_keys: tuple[str, ...],
+    camera_keys: tuple[str, ...],
+    keep_from: int = 0,
 ) -> dict:
     """Read one episode from `ds`, apply trim + delta-action conversion,
     write the result into `new_ds` (must already exist via `.create()`)."""
-    info = analyze_episode(ds, ep, gripper_mask, cfg)
+    info = analyze_episode(ds, ep, gripper_mask, cfg, keep_from)
     ep_start, ep_end, cutoff, end_cutoff = info["ep_start"], info["ep_end"], info["cutoff"], info["end_cutoff"]
     keep_end = (ep_end - ep_start) - end_cutoff  # local index (exclusive) of the last kept frame + 1
 
@@ -375,7 +386,7 @@ def convert_episode(
     # episode (far fewer, much faster video-reader calls than one `ds[idx]`
     # per frame - see module docstring / PickAndInsertCube.md).
     decoded_images: dict[str, np.ndarray] = {}
-    for cam_key in ds.meta.camera_keys:
+    for cam_key in camera_keys:
         video_path = ds.root / ds.meta.get_video_file_path(ep, cam_key)
         frames = decode_video_frames(video_path, kept_timestamps, ds.tolerance_s, ds.video_backend)
         decoded_images[cam_key] = frames.numpy()  # (T, 3, H, W) float32 [0,1]
@@ -385,7 +396,7 @@ def convert_episode(
         frame = {"action": delta_actions[i]}
         for key in passthrough_keys:
             frame[key] = _cast_passthrough_value(ds, key, arrays[key][i])
-        for cam_key in ds.meta.camera_keys:
+        for cam_key in camera_keys:
             frame[cam_key] = _to_hwc_uint8(decoded_images[cam_key][j])
         new_ds.add_frame(frame=frame, task=task_str)
 
@@ -405,6 +416,16 @@ def main() -> None:
     parser.add_argument("--sustain-frames", type=int, default=TrimConfig.sustain_frames)
     parser.add_argument("--max-trim-frames", type=int, default=TrimConfig.max_trim_frames)
     parser.add_argument("--min-remaining-frames", type=int, default=TrimConfig.min_remaining_frames)
+    parser.add_argument(
+        "--keep-from", default="",
+        help="Per-episode first frame to keep, 'ep:frame,ep:frame' (earlier frames are dropped). "
+             "E.g. keep only the recovery part of deliberately-failed episodes.",
+    )
+    parser.add_argument(
+        "--drop-features", default="",
+        help="Comma-separated features (columns or cameras) left out of the output, e.g. to match the schema of "
+             "a dataset it will be merged with: observation.images.cam_specialist,observation.intervened",
+    )
     args = parser.parse_args()
 
     cfg = TrimConfig(
@@ -428,7 +449,11 @@ def main() -> None:
         [int(e) for e in args.episodes.split(",")] if args.episodes else all_episodes
     )
 
-    results = [analyze_episode(ds, ep, gripper_mask, cfg) for ep in episodes]
+    keep_from = {int(e): int(f) for e, f in (x.split(":") for x in args.keep_from.split(",") if x.strip())}
+    stray = set(keep_from) - set(episodes)
+    if stray:
+        raise ValueError(f"--keep-from names episodes that are not processed: {sorted(stray)}")
+    results = [analyze_episode(ds, ep, gripper_mask, cfg, keep_from.get(ep, 0)) for ep in episodes]
     total_len = sum(r["length"] for r in results)
     total_start_cutoff = sum(r["cutoff"] for r in results)
     total_end_cutoff = sum(r["end_cutoff"] for r in results)
@@ -455,8 +480,14 @@ def main() -> None:
     if output_root.exists():
         raise FileExistsError(f"--output-root {output_root} already exists - refusing to overwrite.")
 
+    drop = {k.strip() for k in args.drop_features.split(",") if k.strip()}
+    unknown = drop - set(ds.meta.features)
+    if unknown:
+        raise ValueError(f"--drop-features not in the dataset: {sorted(unknown)}")
+    if drop & {"action", "observation.state"}:
+        raise ValueError("--drop-features cannot drop action or observation.state")
     new_features = {
-        k: v for k, v in ds.meta.features.items() if k not in AUTO_MANAGED_KEYS
+        k: v for k, v in ds.meta.features.items() if k not in AUTO_MANAGED_KEYS and k not in drop
     }
     new_ds = LeRobotDataset.create(
         repo_id=output_root.name,
@@ -468,12 +499,14 @@ def main() -> None:
         image_writer_threads=4,
     )
 
-    passthrough_keys = _passthrough_keys(ds)
+    passthrough_keys = tuple(k for k in _passthrough_keys(ds) if k not in drop)
+    camera_keys = tuple(k for k in ds.meta.camera_keys if k not in drop)
     logger.info("passthrough columns (copied through unchanged): %s", passthrough_keys)
+    logger.info("cameras: %s; dropped: %s", camera_keys, sorted(drop))
 
     written = []
     for ep in episodes:
-        info = convert_episode(ds, new_ds, ep, gripper_mask, cfg, passthrough_keys)
+        info = convert_episode(ds, new_ds, ep, gripper_mask, cfg, passthrough_keys, camera_keys, keep_from.get(ep, 0))
         written.append(info)
         logger.info("wrote episode %d -> %d frames (trimmed %d start + %d end)",
                     ep, info["remaining"], info["cutoff"], info["end_cutoff"])
@@ -492,6 +525,7 @@ def main() -> None:
                                "end_cutoff": r["end_cutoff"], "original_length": r["length"],
                                "new_length": r["remaining"]}
                               for r in written],
+        "dropped_features": sorted(drop),
         "gripper_dims_kept_absolute": [n for n, g in zip(action_names, gripper_mask) if g],
         "delta_dims": [n for n, g in zip(action_names, gripper_mask) if not g],
     }
