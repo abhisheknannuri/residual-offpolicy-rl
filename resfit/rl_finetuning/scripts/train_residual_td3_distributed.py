@@ -78,6 +78,7 @@ from resfit.lerobot.utils.load_policy import (
 from resfit.rl_finetuning.config.residual_td3 import (
     ResidualTD3DexmgConfig,
     ResidualTD3TrossenRealConfig,
+    camera_keys,
 )
 from resfit.rl_finetuning.off_policy.common_utils import utils
 from resfit.rl_finetuning.off_policy.distributed.comms import (
@@ -608,7 +609,6 @@ def _make_get_envs(cfg):
             from trossen_real.inference.policy_client import ChunkedPolicyClient, PolicyClient
             from trossen_real.leader.trossen_leader_single import TrossenSingleLeader
             from trossen_real.rl.real_residual_env import TrossenResidualEnv
-            from trossen_real.teleop.follower_client import FollowerClient
 
             assert num_envs == 1, "Real hardware only supports a single station (num_envs must be 1)"
             station_config = load_station_config(cfg.station_config_name)
@@ -620,7 +620,12 @@ def _make_get_envs(cfg):
                     f"'{station_config.control.command_space}')."
                 )
 
-            follower = FollowerClient(station_config.follower_server_url)
+            # reset.single.mode in the station config: "normal" -> FollowerClient,
+            # "stage2_*" -> Stage2ResetFollower (asks for the cube with 0 + Enter here).
+            from trossen_real.rl.stage2_reset import make_follower
+
+            follower = make_follower(station_config.follower_server_url, station_config.reset["single"].mode)
+            logger.info("reset mode: %s", station_config.reset["single"].mode)
             follower.connect()
 
             policy_client = PolicyClient(cfg.policy_server_url)
@@ -628,6 +633,14 @@ def _make_get_envs(cfg):
             if not policy_health.get("loaded"):
                 follower.disconnect()
                 raise RuntimeError(f"policy_server.py at {cfg.policy_server_url} has no policy loaded - {policy_health}")
+            _, _policy_keys = camera_keys(cfg)
+            _missing = [k for k in (policy_health.get("image_keys") or []) if k not in _policy_keys]
+            if _missing:
+                follower.disconnect()
+                raise RuntimeError(
+                    f"the base policy needs cameras {_missing}, which are not in the cameras sent to it "
+                    f"({_policy_keys}: policy_camera, or rl_camera when policy_camera is null)"
+                )
 
             # Chunked fetching for the live rollout: one round trip per N ticks
             # instead of per tick. Only the NETWORK pattern changes - /predict
@@ -695,7 +708,7 @@ def _make_get_envs(cfg):
                 pedal = PedalListener()
                 logger.info("[env] 3f: pedal ready (healthy=%s)", pedal.is_healthy())
 
-            real_image_keys = [cfg.rl_camera] if isinstance(cfg.rl_camera, str) else list(cfg.rl_camera)
+            real_image_keys, real_policy_image_keys = camera_keys(cfg)
             reset_cfg = station_config.reset["single"]
             return TrossenResidualEnv(
                 follower=follower,
@@ -722,6 +735,7 @@ def _make_get_envs(cfg):
                 log_file=cfg.real_log_file,
                 policy_image_encoding=cfg.policy_image_encoding,
                 policy_jpeg_quality=cfg.policy_jpeg_quality,
+                policy_image_keys=real_policy_image_keys,
             )
 
         # Build the stage-aware reward-model config (training env only). Passed as a
@@ -982,6 +996,9 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
     if cfg.algo.sampling_strategy == "prioritized_replay":
         online_cache_meta["priority_alpha"] = cfg.algo.priority_alpha
         online_cache_meta["priority_beta"] = cfg.algo.priority_beta
+    # Online transitions store the base action too: same rule as the offline key.
+    if cfg.get("policy_camera", None) is not None:
+        online_cache_meta["policy_image_keys"] = camera_keys(cfg)[1]
 
     pprint.pprint(online_cache_meta)
     _online_meta_str = json.dumps(online_cache_meta, sort_keys=True)
@@ -1110,6 +1127,7 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
         post_resize=None,
         policy_image_encoding: str = "raw",
         policy_jpeg_quality: int = 95,
+        policy_image_keys: list[str] | None = None,
     ) -> int:
         """
         Iterates through *dataset* sequentially, converts consecutive frames
@@ -1174,8 +1192,9 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
                     # touches a local in-process ACTPolicy (none is loaded for real
                     # hardware; the checkpoint's lerobot version may not even match
                     # this repo's vendored resfit.lerobot ACT implementation).
+                    # Base-policy cameras (policy_camera, or the RL cameras when unset).
                     json_obs = _dataset_sample_to_json_obs(
-                        sample, image_keys, policy_image_encoding, policy_jpeg_quality)
+                        sample, policy_image_keys or image_keys, policy_image_encoding, policy_jpeg_quality)
                     base_action_np = real_policy_client.predict(json_obs)  # (7,) real units
                     base_action = torch.from_numpy(np.asarray(base_action_np, dtype=np.float32)).unsqueeze(0)
                     base_action_scaled = action_scaler.scale(base_action.squeeze(0).cpu())
@@ -1409,6 +1428,11 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
     if cfg.algo.sampling_strategy == "prioritized_replay":
         offline_cache_meta["priority_alpha"] = cfg.algo.priority_alpha
         offline_cache_meta["priority_beta"] = cfg.algo.priority_beta
+    # The base actions in the offline buffer depend on the cameras sent to the
+    # base policy. Only added when policy_camera is set, so caches built before
+    # this option existed (policy cameras == RL cameras) keep their hash.
+    if cfg.get("policy_camera", None) is not None:
+        offline_cache_meta["policy_image_keys"] = camera_keys(cfg)[1]
 
     pprint.pprint(offline_cache_meta)
 
@@ -1464,6 +1488,7 @@ def _learner_body(cfg, comms: LearnerComms, fp_hash: str, fp_flat: dict):
                 post_resize=offline_image_transforms if _query_base_actions_from_remote_policy else None,
                 policy_image_encoding=cfg.policy_image_encoding,
                 policy_jpeg_quality=cfg.policy_jpeg_quality,
+                policy_image_keys=camera_keys(cfg)[1],
             )
 
             print(f"Added {added} offline transitions to buffer (size={len(offline_rb)})")

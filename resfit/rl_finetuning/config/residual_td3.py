@@ -476,6 +476,11 @@ class ResidualTD3TrossenRealConfig(ResidualTD3DexmgConfig):
             "observation.images.cam_right_wrist",
         ]
     )
+    # Cameras sent to the base policy (ACT, policy_server.py). None = the same as
+    # rl_camera (the behaviour before this option existed). Set it when RL should
+    # see different cameras than ACT, e.g. RL with cam_specialist + both wrists,
+    # ACT with the two wrists it was trained on. See camera_keys().
+    policy_camera: list[str] | None = None
 
     offline_data: OfflineDataConfig = field(
         default_factory=lambda: OfflineDataConfig(
@@ -599,6 +604,21 @@ class ResidualTD3TwoArmCanSortConfig(ResidualTD3BoxCleanConfig):
 # -----------------------------------------------------------------------------
 # Register with Hydra
 # -----------------------------------------------------------------------------
+def camera_keys(cfg) -> tuple[list[str], list[str]]:
+    """(RL cameras, base-policy cameras) from `rl_camera` / `policy_camera`.
+
+    The RL cameras are what the residual actor/critic see (and what the replay
+    buffers store); the base-policy cameras are what is sent to
+    policy_server.py for the base action. `policy_camera` None (or absent, e.g.
+    sim configs) means the same list as `rl_camera`.
+    """
+    rl = [cfg.rl_camera] if isinstance(cfg.rl_camera, str) else list(cfg.rl_camera)
+    pc = cfg.get("policy_camera", None) if hasattr(cfg, "get") else getattr(cfg, "policy_camera", None)
+    if pc is None:
+        return rl, list(rl)
+    return rl, ([pc] if isinstance(pc, str) else list(pc))
+
+
 cs = ConfigStore.instance()
 cs.store(name="residual_td3_dexmg_config", node=ResidualTD3DexmgConfig)
 cs.store(name="residual_td3_can_config", node=ResidualTD3CanConfig)

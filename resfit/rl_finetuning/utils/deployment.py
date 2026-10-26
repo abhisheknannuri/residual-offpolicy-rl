@@ -147,6 +147,9 @@ def build_deployment_meta(
             "action_dim": 7,
             "prop_dim": 7,
             "real_action_space": cfg.get("real_action_space", None),
+            # Cameras the base policy got during training (None = same as image_keys).
+            # Informational: at inference ACT's cameras come from policy_server.py.
+            "policy_image_keys": cfg.get("policy_camera", None),
         },
         "provenance": {
             "dataset_name": cfg.offline_data.name,

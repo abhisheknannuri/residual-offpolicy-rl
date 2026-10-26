@@ -29,9 +29,20 @@ headless: true
 # true would use the dataset's dense next.reward column instead.
 reward_shaping: false    # HASHED (offline)
 video_key: observation.images.agentview
-# the two wrist cameras the policy actually consumes. Must match what
-# policy_server.py reports, and it is hashed as 'image_keys'.
+# Cameras the residual RL actor/critic see (and the buffers store). Stage-2 RL
+# (2026-10-26): both wrists + cam_specialist, which sees the hole; ACT keeps its
+# two wrists via policy_camera below. Hashed as 'image_keys'.
+# Trial1 / stage-0 RL used only the two wrists (and policy_camera: null).
 rl_camera:    # HASHED (both, as 'image_keys')
+- observation.images.cam_left_wrist
+- observation.images.cam_right_wrist
+- observation.images.cam_specialist
+# Cameras sent to the base policy (ACT) for the base action. null = the same as
+# rl_camera (behaviour before this option). Set it when RL sees other cameras
+# than ACT, e.g. rl_camera = both wrists + cam_specialist and policy_camera =
+# the two wrists ACT was trained on. The trainer refuses to start if ACT needs a
+# camera that is not in this list.
+policy_camera:    # HASHED (both, as 'policy_image_keys', only when set)
 - observation.images.cam_left_wrist
 - observation.images.cam_right_wrist
 algo:
@@ -67,7 +78,8 @@ algo:
   actor_lr_warmup_steps: 0
   # exploration noise during warm-up, per joint. Mirrors action_scale
   # so warm-up stays inside the residual range the actor can produce.
-  random_action_noise_scale: [0.15, 0.15, 0.15, 0.05, 0.05, 0.05, 0.1]    # HASHED (online)
+  # 2026-10-26: 0.05 everywhere (was [0.15,0.15,0.15,0.05,0.05,0.05,0.1], from sim).
+  random_action_noise_scale: [0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05]    # HASHED (online)
   sampling_strategy: uniform    # HASHED (both)
   prefetch_batches: 4
   priority_alpha: 0.6
@@ -88,8 +100,11 @@ algo:
   # merged, so every run used a flat 0.05 (e.g. run_2026-10-09_11-00-05).
   # Fixed by making stddev_schedule an interpolation (config/rlpd.py) and
   # making utils.schedule() accept lists.
-  stddev_max: [0.015, 0.015, 0.015, 0.03, 0.03, 0.03, 0.0125]
-  stddev_min: [0.015, 0.015, 0.015, 0.03, 0.03, 0.03, 0.0125]
+  # 2026-10-26: 0.015 everywhere = 30% of the 0.05 residual cap on every dim
+  # (was [0.015,0.015,0.015,0.03,0.03,0.03,0.0125]: 60% of the cap on the wrist,
+  # i.e. more than the wrist's own typical per-step motion in the data).
+  stddev_max: [0.015, 0.015, 0.015, 0.015, 0.015, 0.015, 0.015]
+  stddev_min: [0.015, 0.015, 0.015, 0.015, 0.015, 0.015, 0.015]
   stddev_step: 300000
   # Built from the three keys above, resolved AFTER all yaml/CLI merging.
   # Leave it as this interpolation and edit stddev_max/min/step instead. Only
@@ -176,7 +191,14 @@ agent:
     action_l2_reg_weight: 0.0
     # per-joint residual limit (6 joint deltas + gripper). START SMALL on
     # real hardware and raise only after watching it move.
-    action_scale: [0.15, 0.15, 0.15, 0.05, 0.05, 0.05, 0.1]
+    # 2026-10-26: 0.05 everywhere (was [0.15,0.15,0.15,0.05,0.05,0.05,0.1], chosen
+    # in sim with Cartesian control). Residual cap = s * half_exp; on the stage-2
+    # dataset that is base 0.0033, shoulder 0.0067, elbow 0.0069, wrist 0.004-0.006
+    # rad/step (~1-2 mm/step at the gripper), and the gripper target can rise by
+    # at most ~2.6 mm (stays below the cube width, so the grip holds).
+    # NOT part of the buffer cache keys: changing it on the same dataset reuses
+    # a buffer normalized with the old value.
+    action_scale: [0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05]
     num_layers: 2
     use_layer_norm: true
   critic_grad_clip_norm: 1.0
@@ -190,10 +212,13 @@ agent:
   clip_q_target_to_reward_range: false
   target_action_noise: true
 offline_data:
-  # MUST be the '_old' v2.1 copy: the vendored lerobot is
-  # CODEBASE_VERSION 'v2.1' and cannot read the v3.0 sibling.
-  name: PickCubeAndInsert_Station3_Trial1_deltajoint_old    # HASHED (offline)
-  num_episodes: 178    # HASHED (offline)
+  # MUST be v2.1: the vendored lerobot is CODEBASE_VERSION 'v2.1'.
+  # Stage-2 RL dataset (2026-10-26): iter1 rollouts + recovery episodes, each cut
+  # from where SARM first detects stage 2 ("cube above the hole") to the end,
+  # 3 cameras, delta joint. See scripts/TrossenStation3Real/RL/STAGE2_RL.md.
+  # Before: PickCubeAndInsert_Station3_Trial1_deltajoint_old, 178 episodes.
+  name: PickCubeAndInsert_TS3_Stage2_RL_deltajoint_v21    # HASHED (offline)
+  num_episodes: 99    # HASHED (offline)
   # true = each offline transition's base action is fetched from
   # policy_server.py. This is why building the offline buffer needs
   # the policy server (and, incidentally, the robot).
@@ -218,7 +243,9 @@ offline_data:
   # dataset lives somewhere else (e.g. on the server), or override per run:
   #     ./01_populate_buffers.sh offline_data.root=/abs/path/to/dataset
   # root: /home/qte9489/personal_abhi/temp/residual-offpolicy-rl/trossen_real/datasets/PickCubeAndInsert_Station3_Trial1_deltajoint_old    # HASHED (offline)
-  root: /home/qte9489/Research/DatasetUtils/CubePickAndInsert_TrossenReal/Station3_Trial1/PickCubeAndInsert_Station3_Trial1_deltajoint_old/
+  # laptop copy: /home/qte9489/personal_abhi/temp/residual-offpolicy-rl/trossen_real/datasets/iterativeTraining/TrossenStation3/RL_Stage2/PickCubeAndInsert_TS3_Stage2_RL_deltajoint_v21
+  # before: /home/qte9489/Research/DatasetUtils/CubePickAndInsert_TrossenReal/Station3_Trial1/PickCubeAndInsert_Station3_Trial1_deltajoint_old/
+  root: /home/qte9489/Research/DatasetUtils/CubePickAndInsert_TrossenReal/Station3_Trial1/PickCubeAndInsert_TS3_Stage2_RL_deltajoint_v21/
   remap_preset: null
 wandb:
   project: trossen-station3-pick-and-insert-residual-td3
@@ -266,7 +293,7 @@ enable_intervention: true
 # Or set it here:
 #     real_log_file: /home/qte9489/personal_abhi/temp/residual-offpolicy-rl/RealTrainLogs/station3_online_2026-10-12_run1.jsonl
 # null = no log.
-real_log_file: /home/qte9489/personal_abhi/temp/residual-offpolicy-rl/RealTrainLogs/station3_online_2026-10-12_run1.jsonl
+real_log_file: /home/qte9489/personal_abhi/temp/residual-offpolicy-rl/RealTrainLogs/station3_online_2026-10-26_run1.jsonl
 
 # --- how we talk to policy_server.py -----------------------------------------
 # These apply EVERYWHERE the base policy is queried - the offline buffer build,

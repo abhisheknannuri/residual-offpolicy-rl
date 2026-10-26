@@ -74,6 +74,7 @@ from trossen_real.inference.policy_client import (
     reconstruct_absolute_action,
 )
 from trossen_real.leader.trossen_leader_single import TrossenSingleLeader
+from trossen_real.rl.stage2_reset import leader_sync_joints
 from trossen_real.teleop.follower_client import FollowerClient
 
 logger = logging.getLogger(__name__)
@@ -105,6 +106,7 @@ class TrossenResidualEnv:
         log_file: str | None = None,
         policy_image_encoding: str = "raw",
         policy_jpeg_quality: int = 95,
+        policy_image_keys: list[str] | None = None,
     ) -> None:
         self.follower = follower
         self.cameras = cameras
@@ -114,6 +116,9 @@ class TrossenResidualEnv:
         self.action_scaler = action_scaler
         self.state_standardizer = state_standardizer
         self.image_keys = image_keys
+        # Cameras sent to the base policy (ACT). None = the same as image_keys
+        # (the RL cameras), i.e. the behaviour before this option existed.
+        self.policy_image_keys = list(policy_image_keys) if policy_image_keys is not None else list(image_keys)
         self.action_space_name = action_space
         self.leader = leader
         self.pedal = pedal
@@ -230,7 +235,11 @@ class TrossenResidualEnv:
         self.follower.reset()
         if self.intervention is not None:
             follower_state = self.follower.get_state()
-            self.intervention.sync_to_follower(follower_state["q"], goal_time=self.reset_cfg.goal_time_s)
+            # Stage-2 reset: gripper at the commanded close on the cube, not the
+            # measured cube width (see stage2_reset.leader_sync_joints).
+            self.intervention.sync_to_follower(
+                leader_sync_joints(self.follower, follower_state["q"]), goal_time=self.reset_cfg.goal_time_s
+            )
 
         # Settle before taking the first observation / resetting the policy's
         # action-chunk queue - mirrors infer_app/infer_loop.py's proven
@@ -523,7 +532,9 @@ class TrossenResidualEnv:
         return obs
 
     def _query_base_action(self, follower_state: dict, images: dict[str, np.ndarray]) -> torch.Tensor:
-        json_obs = build_observation(follower_state, images, self.image_keys,
+        # getattr: objects built without __init__ (tests) have only image_keys.
+        keys = getattr(self, "policy_image_keys", None) or self.image_keys
+        json_obs = build_observation(follower_state, images, keys,
                                      self.policy_image_encoding, self.policy_jpeg_quality)
         base_action_np = self.policy.predict(json_obs)  # (7,) real units
         base_action = torch.from_numpy(np.asarray(base_action_np, dtype=np.float32)).unsqueeze(0).to(self.device)  # (1,7)
