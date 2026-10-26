@@ -1,0 +1,400 @@
+<title>Station 3 Action Math</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: one long hand-placed SVG pipeline (5 stacked panels), legend above, per-joint reference tables below. */
+:root {
+  --bg: #f6f7f9; --fg: #1b2330; --muted: #5a6576; --line: #c4ccd7; --frame: #eceff4; --inner: #ffffff;
+  --act-bg: #ebe6f8; --act: #6a55b6;
+  --scl-bg: #fbedcf; --scl: #b07216; --scl-ink: #865409;
+  --st-bg: #d9f0ec; --st: #24877b; --st-ink: #17675d;
+  --rl-bg: #e1ecfa; --rl: #3d6db3;
+  --rob-bg: #e7eaee; --rob: #5b6570;
+  --sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11151c; --fg: #e2e7ee; --muted: #9aa4b3; --line: #3a4350; --frame: #181e27; --inner: #141a22;
+    --act-bg: #29233f; --act: #a593e6;
+    --scl-bg: #3a2c12; --scl: #dfa548; --scl-ink: #f1c477;
+    --st-bg: #133430; --st: #5bc2b3; --st-ink: #86dccf;
+    --rl-bg: #17273c; --rl: #7ea7e6;
+    --rob-bg: #242a32; --rob: #9aa4b3;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11151c; --fg: #e2e7ee; --muted: #9aa4b3; --line: #3a4350; --frame: #181e27; --inner: #141a22;
+  --act-bg: #29233f; --act: #a593e6;
+  --scl-bg: #3a2c12; --scl: #dfa548; --scl-ink: #f1c477;
+  --st-bg: #133430; --st: #5bc2b3; --st-ink: #86dccf;
+  --rl-bg: #17273c; --rl: #7ea7e6;
+  --rob-bg: #242a32; --rob: #9aa4b3;
+  color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 15px; line-height: 1.55; }
+.wrap { max-width: 1240px; margin: 0 auto; padding-inline: 20px; padding-block: 28px 56px; display: grid; gap: 28px; }
+h1 { font-size: 1.75rem; line-height: 1.2; margin: 0; text-wrap: balance; font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: 1.15rem; margin: 0 0 10px; text-wrap: balance; }
+p { margin: 0; max-width: 70ch; }
+.lede { color: var(--muted); }
+.mono { font-family: var(--mono); font-size: 0.92em; }
+.legend { display: flex; flex-wrap: wrap; gap: 10px 18px; font-size: 0.88rem; }
+.chip { display: inline-flex; align-items: center; gap: 8px; }
+.sw { width: 16px; height: 16px; border-radius: 3px; border: 1.5px solid; flex: none; }
+.sw.act { background: var(--act-bg); border-color: var(--act); }
+.sw.scl { background: var(--scl-bg); border-color: var(--scl); }
+.sw.st { background: var(--st-bg); border-color: var(--st); }
+.sw.rl { background: var(--rl-bg); border-color: var(--rl); }
+.sw.rob { background: var(--rob-bg); border-color: var(--rob); }
+.figscroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+figure { margin: 0; }
+figure svg { display: block; width: 100%; min-width: 980px; height: auto; color: var(--fg); }
+figcaption { font-size: 0.88rem; color: var(--muted); padding: 10px 2px 0; max-width: 90ch; }
+/* svg classes */
+.frame { fill: var(--frame); stroke: var(--line); stroke-width: 1; }
+.c-act { fill: var(--act-bg); stroke: var(--act); stroke-width: 1.5; }
+.c-scl { fill: var(--scl-bg); stroke: var(--scl); stroke-width: 1.5; }
+.c-st { fill: var(--st-bg); stroke: var(--st); stroke-width: 1.5; }
+.c-rl { fill: var(--rl-bg); stroke: var(--rl); stroke-width: 1.5; }
+.c-rob { fill: var(--rob-bg); stroke: var(--rob); stroke-width: 1.5; }
+.c-plain { fill: var(--inner); stroke: var(--line); stroke-width: 1.2; }
+.inner { fill: var(--inner); stroke: var(--scl); stroke-width: 1; stroke-dasharray: 0; }
+.arr { stroke: currentColor; stroke-width: 1.5; fill: none; }
+.ft { font-family: var(--sans); font-size: 16px; font-weight: 700; fill: var(--fg); }
+.bt { font-family: var(--sans); font-size: 14px; font-weight: 600; fill: var(--fg); }
+.tx { font-family: var(--sans); font-size: 12.5px; fill: var(--fg); }
+.mx { font-family: var(--mono); font-size: 12px; fill: var(--fg); }
+.ms { font-family: var(--mono); font-size: 11.5px; fill: var(--fg); }
+.mu { font-family: var(--sans); font-size: 12px; fill: var(--muted); }
+.al { font-family: var(--sans); font-size: 11px; fill: var(--muted); }
+.ex { font-family: var(--mono); font-size: 11.5px; fill: var(--muted); }
+.k-scl { fill: var(--scl-ink); font-weight: 600; }
+.k-st { fill: var(--st-ink); font-weight: 600; }
+.notes { display: grid; gap: 12px; }
+.note { border-left: 3px solid var(--scl); padding: 4px 0 4px 14px; max-width: 80ch; }
+.note strong { display: block; }
+.tables { display: grid; gap: 26px; }
+.tblwrap { overflow-x: auto; }
+table { border-collapse: collapse; font-size: 0.86rem; font-variant-numeric: tabular-nums; min-width: 720px; }
+th, td { padding: 6px 10px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+thead th { font-weight: 600; color: var(--muted); font-size: 0.8rem; letter-spacing: 0.02em; }
+td { font-family: var(--mono); font-size: 0.84rem; }
+td:first-child { font-family: var(--sans); }
+.tcap { font-size: 0.85rem; color: var(--muted); margin-top: 6px; max-width: 90ch; }
+.hl { background: var(--scl-bg); }
+</style>
+
+<div class="wrap">
+  <header style="display:grid;gap:10px">
+    <h1>Station 3 action math, from teleop to the follower command</h1>
+    <p class="lede">How one action is represented at every step: absolute joints in the dataset, delta joints for ACT, ACT's z-score, the RL min-max space, and back to an absolute joint target. Joint 2 is followed through with real numbers. Every number is taken from the dataset, the step-70016 checkpoint or the eval logs.</p>
+  </header>
+
+  <div class="legend" aria-label="Colour legend">
+    <span class="chip"><span class="sw act"></span>ACT (base policy, z-score space)</span>
+    <span class="chip"><span class="sw scl"></span>ActionScaler (RL min-max space) and every call to it</span>
+    <span class="chip"><span class="sw st"></span>StateStandardizer and every call to it</span>
+    <span class="chip"><span class="sw rl"></span>RL networks</span>
+    <span class="chip"><span class="sw rob"></span>Robot</span>
+  </div>
+
+  <figure>
+    <div class="figscroll">
+    <svg viewBox="0 0 1200 1612" role="img" aria-label="Pipeline: absolute teleop data is converted to delta joints; ACT trains and predicts in a z-score space and its server returns real-unit deltas; the RL builds a min-max ActionScaler and a z-score StateStandardizer from the dataset stats; each control tick normalizes ACT's action, adds the residual in normalized space, clips, unscales and adds the measured joint position; both buffers store values produced by the same scaler and standardizer.">
+      <defs>
+        <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+
+      <!-- ================= 1 DATASET ================= -->
+      <rect class="frame" x="20" y="20" width="1160" height="212" rx="8"/>
+      <text class="ft" x="40" y="46">1  Dataset</text>
+
+      <rect class="c-plain" x="50" y="62" width="330" height="152" rx="6"/>
+      <text class="bt" x="64" y="86">Teleop recording (absolute)</text>
+      <text class="tx" x="64" y="110">action = leader joint target (rad)</text>
+      <text class="tx" x="64" y="129">state q = follower joints (rad)</text>
+      <text class="tx" x="64" y="148">joint 2 action: 0.638 … 1.821 rad</text>
+      <text class="tx" x="64" y="167">gripper: 0.004 … 0.040 m (absolute)</text>
+      <text class="mu" x="64" y="190">178 episodes · 55,177 frames · 20 Hz</text>
+
+      <rect class="c-plain" x="430" y="62" width="330" height="152" rx="6"/>
+      <text class="bt" x="444" y="86">convert_to_delta_joint_dataset.py</text>
+      <text class="mx" x="444" y="112">a[0:6] = a_abs[0:6] − q[0:6]</text>
+      <text class="tx" x="444" y="134">a[6] (gripper) stays absolute, m</text>
+      <text class="tx" x="444" y="153">state q is kept as it is</text>
+      <text class="mu" x="444" y="190">checked: exact (error 0.0) on episode 0</text>
+
+      <rect class="c-plain" x="810" y="62" width="340" height="152" rx="6"/>
+      <text class="bt" x="824" y="86">Delta dataset + meta stats</text>
+      <text class="tx" x="824" y="110">meta/episodes_stats.jsonl: min, max, mean, std</text>
+      <text class="tx" x="824" y="129">joint 2 delta: min −0.169, max +0.122</text>
+      <text class="tx" x="824" y="148">mean μ −0.0101, std σ 0.0358 rad/tick</text>
+      <text class="tx" x="824" y="167">typical |a| (median): 0.0137 rad/tick</text>
+      <text class="mu" x="824" y="190">state stats: absolute q, unchanged</text>
+
+      <line class="arr" x1="380" y1="138" x2="428" y2="138" marker-end="url(#ah)"/>
+      <line class="arr" x1="760" y1="138" x2="808" y2="138" marker-end="url(#ah)"/>
+
+      <!-- 1 -> 2 : data + mu, sigma -->
+      <polyline class="arr" points="980,214 980,244 300,244 300,296" marker-end="url(#ah)"/>
+      <text class="al" x="560" y="240">delta actions + μ, σ  (ACT's own normalizer)</text>
+
+      <!-- ================= 2 ACT ================= -->
+      <rect class="frame" x="20" y="256" width="1160" height="212" rx="8"/>
+      <text class="ft" x="40" y="282">2  ACT</text>
+
+      <rect class="c-act" x="50" y="298" width="330" height="152" rx="6"/>
+      <text class="bt" x="64" y="322">lerobot ACT training</text>
+      <text class="mx" x="64" y="348">z = (a − μ) / σ</text>
+      <text class="tx" x="64" y="370">μ, σ = delta-action mean, std</text>
+      <text class="tx" x="64" y="389">predicts a chunk of 20 z values</text>
+      <text class="mu" x="64" y="426">z is unbounded: −7.9 … +6.0 seen</text>
+
+      <rect class="c-act" x="430" y="298" width="330" height="152" rx="6"/>
+      <text class="bt" x="444" y="322">policy_server.py</text>
+      <text class="mx" x="444" y="348">a = μ + σ · z</text>
+      <text class="tx" x="444" y="370">returns a real delta, rad/tick</text>
+      <text class="tx" x="444" y="389">1 forward → 14 steps open-loop</text>
+      <text class="mu" x="444" y="426">verified on 80,474 ticks: error 1e-8</text>
+
+      <rect class="c-plain" x="810" y="298" width="340" height="152" rx="6"/>
+      <text class="bt" x="824" y="322">Every client</text>
+      <text class="tx" x="824" y="346">RL env, infer app, residual client</text>
+      <text class="tx" x="824" y="365">get real units only</text>
+      <text class="tx" x="824" y="384">never see z, μ or σ</text>
+      <text class="mu" x="824" y="426">joint 2 example: a_ACT = +0.0137 rad</text>
+
+      <line class="arr" x1="380" y1="374" x2="428" y2="374" marker-end="url(#ah)"/>
+      <line class="arr" x1="760" y1="374" x2="808" y2="374" marker-end="url(#ah)"/>
+      <text class="al" x="388" y="366">z</text>
+      <text class="al" x="768" y="366">real a</text>
+
+      <!-- ================= 3 RL SETUP ================= -->
+      <rect class="frame" x="20" y="492" width="1160" height="292" rx="8"/>
+      <text class="ft" x="40" y="518">3  RL setup (once, when the learner starts)</text>
+
+      <!-- ActionScaler component -->
+      <rect class="c-scl" x="40" y="532" width="742" height="236" rx="8"/>
+      <text class="bt" x="56" y="556">ActionScaler</text>
+      <text class="mu" x="160" y="556">resfit/rl_finetuning/utils/normalization.py</text>
+
+      <rect class="inner" x="58" y="570" width="170" height="124" rx="5"/>
+      <text class="bt" x="70" y="592">inputs</text>
+      <text class="ms" x="70" y="614">min, max  ← stats (1)</text>
+      <text class="ms" x="70" y="634">action_scale s</text>
+      <text class="ms" x="70" y="654">min_action_range 0.1</text>
+      <text class="al" x="70" y="682">mean, std: not used</text>
+
+      <rect class="inner" x="254" y="570" width="244" height="124" rx="5"/>
+      <text class="bt" x="266" y="592">box per joint</text>
+      <text class="ms" x="266" y="614">mid  = (max + min) / 2</text>
+      <text class="ms" x="266" y="634">half = max((max−min)/2, 0.05)</text>
+      <text class="ms" x="266" y="654">he   = half · (1 + s)</text>
+      <text class="ms" x="266" y="674">L    = mid ± he</text>
+
+      <rect class="inner" x="524" y="570" width="244" height="124" rx="5"/>
+      <text class="bt" x="536" y="592">functions</text>
+      <text class="ms" x="536" y="614">scale(a) = (clipL(a) − mid)/he</text>
+      <text class="ms" x="536" y="634">unscale(n) = mid + clip1(n)·he</text>
+      <text class="ms" x="536" y="654">bounds: ±1, gripper ±0.327</text>
+      <text class="al" x="536" y="682">he = half_exp</text>
+
+      <line class="arr" x1="228" y1="632" x2="252" y2="632" marker-end="url(#ah)"/>
+      <line class="arr" x1="498" y1="632" x2="522" y2="632" marker-end="url(#ah)"/>
+
+      <text class="tx" x="58" y="718">joint 2: mid −0.0235 · half 0.1455 · ×(1 + 0.15) → he 0.1674 · L = [−0.191, +0.144] rad</text>
+      <text class="mu" x="58" y="738">stddev_max / stddev_min are exploration noise for the actor, not scaler inputs.</text>
+      <text class="mu" x="58" y="757">Saved in the checkpoint (deployment.normalization); the actor rebuilds it and checks it matches.</text>
+
+      <!-- StateStandardizer component -->
+      <rect class="c-st" x="808" y="532" width="356" height="236" rx="8"/>
+      <text class="bt" x="824" y="556">StateStandardizer</text>
+      <text class="mu" x="824" y="574">same file</text>
+      <text class="ms" x="824" y="600">inputs: state mean, std ← (1)</text>
+      <text class="ms" x="824" y="622">std = max(std, 0.1)</text>
+      <text class="ms" x="824" y="644">standardize(q) = (q − mean)/std</text>
+      <text class="tx" x="824" y="670">z-score like ACT, but its own object;</text>
+      <text class="tx" x="824" y="688">no widening, nothing recomputed</text>
+      <text class="tx" x="824" y="714">joint 2: mean 1.3651, std 0.2855 rad</text>
+      <text class="mu" x="824" y="734">joint 4: std 0.0273 → 0.1</text>
+      <text class="mu" x="824" y="752">gripper: std 0.0132 → 0.1</text>
+
+      <!-- ================= 4 ONE TICK ================= -->
+      <rect class="frame" x="20" y="808" width="1160" height="544" rx="8"/>
+      <text class="ft" x="40" y="834">4  One control tick (RL env and deployment)</text>
+
+      <rect class="c-rob" x="50" y="852" width="190" height="70" rx="6"/>
+      <text class="bt" x="64" y="878">Follower arm</text>
+      <text class="tx" x="64" y="900">q, absolute (rad)</text>
+
+      <rect class="c-act" x="50" y="984" width="190" height="84" rx="6"/>
+      <text class="bt" x="64" y="1008">ACT server</text>
+      <text class="tx" x="64" y="1028">a_ACT, real delta</text>
+      <text class="ex" x="64" y="1052">j2: +0.0137 rad</text>
+
+      <rect class="c-st" x="282" y="852" width="198" height="70" rx="6"/>
+      <text class="bt" x="296" y="878">standardize(q)</text>
+      <text class="tx" x="296" y="900">→ state_n</text>
+
+      <rect class="c-scl" x="282" y="984" width="198" height="84" rx="6"/>
+      <text class="bt" x="296" y="1008">ActionScaler.scale</text>
+      <text class="tx" x="296" y="1028">→ base_n</text>
+      <text class="ex" x="296" y="1052">j2: +0.2222</text>
+
+      <rect class="c-rl" x="540" y="852" width="290" height="200" rx="6"/>
+      <text class="bt" x="554" y="878">Residual actor</text>
+      <text class="ms" x="554" y="904">mu = tanh(MLP(img,state_n,base_n))</text>
+      <text class="ms" x="554" y="926">r  = mu · s        |r| ≤ s</text>
+      <text class="ms" x="554" y="948">training: r += N(0, stddev)</text>
+      <text class="tx" x="554" y="972">stddev from stddev_max / min</text>
+      <text class="tx" x="554" y="991">(the noise; not a stat)</text>
+      <text class="ex" x="554" y="1030">j2 at the cap: r = +0.15</text>
+
+      <rect class="c-scl" x="540" y="1100" width="290" height="88" rx="6"/>
+      <text class="bt" x="554" y="1124">combine (normalized)</text>
+      <text class="ms" x="554" y="1148">clip(base_n + r, low, high)</text>
+      <text class="ex" x="554" y="1172">j2: 0.2222 + 0.15 = 0.3722</text>
+
+      <rect class="c-rl" x="900" y="852" width="250" height="100" rx="6"/>
+      <text class="bt" x="914" y="878">Critic</text>
+      <text class="ms" x="914" y="904">Q(img, state_n, combined_n)</text>
+      <text class="tx" x="914" y="928">sees the sum, not base_n</text>
+
+      <rect class="c-scl" x="900" y="1100" width="250" height="88" rx="6"/>
+      <text class="bt" x="914" y="1124">ActionScaler.unscale</text>
+      <text class="ms" x="914" y="1148">delta = mid + n_c · he</text>
+      <text class="ex" x="914" y="1172">j2: +0.0388 rad (2.8× ACT)</text>
+
+      <rect class="c-rob" x="900" y="1222" width="250" height="96" rx="6"/>
+      <text class="bt" x="914" y="1246">Command to follower</text>
+      <text class="ms" x="914" y="1270">target[0:6] = q + delta</text>
+      <text class="ms" x="914" y="1290">grip = clip(g, 0.004, 0.040)</text>
+      <text class="tx" x="914" y="1309">goal time 125 ms</text>
+
+      <!-- tick arrows -->
+      <line class="arr" x1="240" y1="887" x2="280" y2="887" marker-end="url(#ah)"/>
+      <text class="al" x="254" y="880">q</text>
+      <line class="arr" x1="480" y1="887" x2="538" y2="887" marker-end="url(#ah)"/>
+      <text class="al" x="486" y="880">state_n</text>
+      <line class="arr" x1="240" y1="1018" x2="280" y2="1018" marker-end="url(#ah)"/>
+      <text class="al" x="246" y="1011">real</text>
+      <line class="arr" x1="480" y1="1018" x2="538" y2="1018" marker-end="url(#ah)"/>
+      <text class="al" x="486" y="1011">base_n</text>
+      <polyline class="arr" points="480,1050 510,1050 510,1144 538,1144" marker-end="url(#ah)"/>
+      <text class="al" x="456" y="1100">base_n</text>
+      <line class="arr" x1="685" y1="1052" x2="685" y2="1098" marker-end="url(#ah)"/>
+      <text class="al" x="693" y="1080">r</text>
+      <line class="arr" x1="830" y1="1144" x2="898" y2="1144" marker-end="url(#ah)"/>
+      <polyline class="arr" points="860,1144 860,902 898,902" marker-end="url(#ah)"/>
+      <text class="al" x="866" y="1020">combined_n</text>
+      <line class="arr" x1="1025" y1="1188" x2="1025" y2="1220" marker-end="url(#ah)"/>
+      <text class="al" x="1033" y="1209">delta, rad</text>
+      <polyline class="arr" points="50,910 32,910 32,1334 1060,1334 1060,1320" marker-end="url(#ah)"/>
+      <text class="al" x="300" y="1328">q_before, read just before the move (same q the delta is added to)</text>
+
+      <!-- ================= 5 BUFFERS ================= -->
+      <rect class="frame" x="20" y="1376" width="1160" height="220" rx="8"/>
+      <text class="ft" x="40" y="1402">5  Replay buffers (same scaler, same standardizer)</text>
+
+      <rect class="c-plain" x="50" y="1418" width="530" height="160" rx="6"/>
+      <text class="bt" x="64" y="1442">Online buffer (robot)</text>
+      <text class="mx" x="64" y="1468">obs.state       = <tspan class="k-st">standardize</tspan>(q)</text>
+      <text class="mx" x="64" y="1490">obs.base_action = <tspan class="k-scl">scale</tspan>(a_ACT)</text>
+      <text class="mx" x="64" y="1512">action          = <tspan class="k-scl">scale</tspan>(executed − q_before)</text>
+      <text class="tx" x="64" y="1540">autonomous: equals combined_n (gripper within physical range)</text>
+      <text class="tx" x="64" y="1559">intervened: your delta, clipped to L before it is executed</text>
+
+      <rect class="c-plain" x="620" y="1418" width="530" height="160" rx="6"/>
+      <text class="bt" x="634" y="1442">Offline buffer (dataset)</text>
+      <text class="mx" x="634" y="1468">obs.state       = <tspan class="k-st">standardize</tspan>(dataset q)</text>
+      <text class="mx" x="634" y="1490">obs.base_action = <tspan class="k-scl">scale</tspan>(ACT on that frame)</text>
+      <text class="mx" x="634" y="1512">action          = <tspan class="k-scl">scale</tspan>(dataset delta a)</text>
+      <text class="tx" x="634" y="1540">each training batch: 50% offline + 50% online</text>
+      <text class="tx" x="634" y="1559">critic target re-combines with the same clip(low, high)</text>
+    </svg>
+    </div>
+    <figcaption>One action from data to robot. ACT's z-score (violet) and the RL's min-max space (amber) are separate. ACT's normalized numbers never leave its server. The RL converts ACT's real delta into its own space, adds the residual there, clips, converts back to a real delta and adds the measured joint position.</figcaption>
+  </figure>
+
+  <section class="notes">
+    <h2>Three places where the code differs from the usual mental model</h2>
+    <div class="note"><strong>The RL action space is min-max, not z-score.</strong> ActionScaler reads only the dataset action <span class="mono">min</span> and <span class="mono">max</span>. The action <span class="mono">mean</span> and <span class="mono">std</span> are what ACT uses, and the RL never reads them.</div>
+    <div class="note"><strong><span class="mono">stddev_max</span> / <span class="mono">stddev_min</span> are not statistics.</strong> They set the width of the exploration noise added to the actor's output during training (and to the critic's target action). They play no part in the scaler.</div>
+    <div class="note"><strong>The residual is added in normalized space, then unscaled once.</strong> The code computes <span class="mono">unscale(clip(base_n + r))</span>. Without clipping this equals ACT's real delta plus <span class="mono">r · half_exp</span>, checked to 5e-8 on 6,828 eval ticks. <span class="mono">action_scale</span> appears twice: it widens the box (<span class="mono">he = half · (1 + s)</span>) and it caps the residual (<span class="mono">|r| ≤ s</span>).</div>
+  </section>
+
+  <section class="tables">
+    <div>
+      <h2>Dataset actions per joint</h2>
+      <div class="tblwrap"><table>
+        <thead><tr><th>joint</th><th>absolute min</th><th>absolute max</th><th>delta min</th><th>delta max</th><th>μ (mean)</th><th>σ (std)</th><th>median |a|</th></tr></thead>
+        <tbody>
+          <tr><td>0</td><td>−0.5037</td><td>0.2272</td><td>−0.06867</td><td>0.07858</td><td>−0.000558</td><td>0.013650</td><td>0.00381</td></tr>
+          <tr><td>1</td><td>1.1423</td><td>2.2654</td><td>−0.17433</td><td>0.10910</td><td>0.001915</td><td>0.036591</td><td>0.01297</td></tr>
+          <tr class="hl"><td>2</td><td>0.6380</td><td>1.8214</td><td>−0.16899</td><td>0.12207</td><td>−0.010083</td><td>0.035802</td><td>0.01373</td></tr>
+          <tr><td>3</td><td>−1.5753</td><td>−0.5835</td><td>−0.12932</td><td>0.11292</td><td>0.002089</td><td>0.026866</td><td>0.00649</td></tr>
+          <tr><td>4</td><td>−0.1593</td><td>0.1295</td><td>−0.06065</td><td>0.06752</td><td>−0.000408</td><td>0.007004</td><td>0.00229</td></tr>
+          <tr><td>5</td><td>−0.9813</td><td>0.9070</td><td>−0.23308</td><td>0.19493</td><td>0.000194</td><td>0.026473</td><td>0.00534</td></tr>
+          <tr><td>6 gripper (m)</td><td>0.0040</td><td>0.0400</td><td>0.00400</td><td>0.04000</td><td>0.022737</td><td>0.016733</td><td>0.03146</td></tr>
+        </tbody>
+      </table></div>
+      <p class="tcap">Computed from all 55,177 frames of the absolute and delta datasets. Joints in rad, delta in rad per tick. μ and σ are exactly ACT's normalizer (fit error 1e-8 on 80,474 eval ticks). The gripper is the same in both datasets because it is never delta-converted.</p>
+    </div>
+
+    <div>
+      <h2>ActionScaler per joint (step-70016 checkpoint)</h2>
+      <div class="tblwrap"><table>
+        <thead><tr><th>joint</th><th>s</th><th>mid</th><th>half (after floor)</th><th>he = half·(1+s)</th><th>L_min</th><th>L_max</th><th>real 0 in normalized</th><th>residual cap s·he</th></tr></thead>
+        <tbody>
+          <tr><td>0</td><td>0.15</td><td>+0.00496</td><td>0.07362</td><td>0.08467</td><td>−0.07971</td><td>+0.08963</td><td>−0.0586</td><td>0.01270</td></tr>
+          <tr><td>1</td><td>0.15</td><td>−0.03262</td><td>0.14172</td><td>0.16298</td><td>−0.19559</td><td>+0.13036</td><td>+0.2001</td><td>0.02445</td></tr>
+          <tr class="hl"><td>2</td><td>0.15</td><td>−0.02346</td><td>0.14553</td><td>0.16736</td><td>−0.19082</td><td>+0.14390</td><td>+0.1402</td><td>0.02510</td></tr>
+          <tr><td>3</td><td>0.05</td><td>−0.00820</td><td>0.12112</td><td>0.12717</td><td>−0.13538</td><td>+0.11897</td><td>+0.0645</td><td>0.00636</td></tr>
+          <tr><td>4</td><td>0.05</td><td>+0.00343</td><td>0.06409</td><td>0.06729</td><td>−0.06386</td><td>+0.07073</td><td>−0.0510</td><td>0.00336</td></tr>
+          <tr><td>5</td><td>0.05</td><td>−0.01907</td><td>0.21401</td><td>0.22471</td><td>−0.24378</td><td>+0.20563</td><td>+0.0849</td><td>0.01124</td></tr>
+          <tr><td>6 gripper (m)</td><td>0.10</td><td>+0.02200</td><td>0.01800 → 0.05000</td><td>0.05500</td><td>−0.03300</td><td>+0.07700</td><td>−0.4000</td><td>0.00550</td></tr>
+        </tbody>
+      </table></div>
+      <p class="tcap">"Real 0 in normalized" is where a zero-motion delta lands in the RL space (−mid / he). Normalized 0 is not "no motion": for joint 1 no motion is +0.200. The gripper's half range is raised to the 0.05 floor (min_action_range 0.1), which is why its physical range only covers ±0.327.</p>
+    </div>
+
+    <div>
+      <h2>StateStandardizer per joint</h2>
+      <div class="tblwrap"><table>
+        <thead><tr><th>joint</th><th>state mean</th><th>state std</th><th>std used (floor 0.1)</th></tr></thead>
+        <tbody>
+          <tr><td>0</td><td>−0.17692</td><td>0.13621</td><td>0.13621</td></tr>
+          <tr><td>1</td><td>+1.82664</td><td>0.25094</td><td>0.25094</td></tr>
+          <tr class="hl"><td>2</td><td>+1.36511</td><td>0.28547</td><td>0.28547</td></tr>
+          <tr><td>3</td><td>−1.06004</td><td>0.25456</td><td>0.25456</td></tr>
+          <tr><td>4</td><td>−0.00462</td><td>0.02730</td><td>0.10000</td></tr>
+          <tr><td>5</td><td>−0.13981</td><td>0.24426</td><td>0.24426</td></tr>
+          <tr><td>6 gripper (m)</td><td>+0.02600</td><td>0.01316</td><td>0.10000</td></tr>
+        </tbody>
+      </table></div>
+      <p class="tcap">The dataset's own state mean and std (absolute joint positions), with only the std floored at min_state_std = 0.1. Nothing is widened or recomputed.</p>
+    </div>
+
+    <div>
+      <h2>One tick at the residual cap, every joint</h2>
+      <div class="tblwrap"><table>
+        <thead><tr><th>joint</th><th>ACT step a (rad)</th><th>base_n = (a − mid)/he</th><th>+ s</th><th>combined_n</th><th>delta = mid + n·he</th><th>delta / a</th></tr></thead>
+        <tbody>
+          <tr><td>0</td><td>+0.00381</td><td>−0.0136</td><td>+0.15</td><td>+0.1364</td><td>+0.01651</td><td>4.33×</td></tr>
+          <tr><td>1</td><td>+0.01297</td><td>+0.2797</td><td>+0.15</td><td>+0.4297</td><td>+0.03742</td><td>2.88×</td></tr>
+          <tr class="hl"><td>2</td><td>+0.01373</td><td>+0.2222</td><td>+0.15</td><td>+0.3722</td><td>+0.03883</td><td>2.83×</td></tr>
+          <tr><td>3</td><td>+0.00649</td><td>+0.1155</td><td>+0.05</td><td>+0.1655</td><td>+0.01285</td><td>1.98×</td></tr>
+          <tr><td>4</td><td>+0.00229</td><td>−0.0170</td><td>+0.05</td><td>+0.0330</td><td>+0.00565</td><td>2.47×</td></tr>
+          <tr><td>5</td><td>+0.00534</td><td>+0.1087</td><td>+0.05</td><td>+0.1587</td><td>+0.01658</td><td>3.10×</td></tr>
+        </tbody>
+      </table></div>
+      <p class="tcap">ACT's typical (median) step plus the full residual in the same direction. The real-unit residual is always exactly s · he (the mid term cancels), so the ratio depends on how small ACT's typical step is compared with the widened range. The command sent is q + delta; nothing in the following ticks of the same ACT chunk removes the extra motion. Full derivation: docs/real/RESIDUAL_DRIFT_MATH.md.</p>
+    </div>
+  </section>
+</div>

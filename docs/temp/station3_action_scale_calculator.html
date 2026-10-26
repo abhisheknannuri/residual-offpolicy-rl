@@ -1,0 +1,251 @@
+<title>Action Scale Calculator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: controls bar (helper + YAML) on top, then one card per joint in an auto-fill grid, then the reasoning. */
+:root {
+  --bg: #f6f7f9; --fg: #1b2330; --muted: #5a6576; --line: #c4ccd7; --panel: #ffffff;
+  --scl-bg: #fbedcf; --scl: #b07216; --scl-ink: #865409;
+  --act: #6a55b6; --act-bg: #ebe6f8;
+  --warn: #b3261e; --ok: #1f7a4d;
+  --sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11151c; --fg: #e2e7ee; --muted: #9aa4b3; --line: #3a4350; --panel: #171d26;
+    --scl-bg: #3a2c12; --scl: #dfa548; --scl-ink: #f1c477;
+    --act: #a593e6; --act-bg: #29233f;
+    --warn: #ff8a80; --ok: #6fd3a0;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11151c; --fg: #e2e7ee; --muted: #9aa4b3; --line: #3a4350; --panel: #171d26;
+  --scl-bg: #3a2c12; --scl: #dfa548; --scl-ink: #f1c477;
+  --act: #a593e6; --act-bg: #29233f;
+  --warn: #ff8a80; --ok: #6fd3a0;
+  color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 15px; line-height: 1.5; }
+.wrap { max-width: 1240px; margin: 0 auto; padding-inline: 18px; padding-block: 26px 56px; display: grid; gap: 24px; }
+h1 { font-size: 1.7rem; margin: 0; line-height: 1.2; text-wrap: balance; }
+h2 { font-size: 1.1rem; margin: 0 0 8px; }
+p { margin: 0; max-width: 72ch; }
+.lede { color: var(--muted); }
+code, .mono { font-family: var(--mono); font-size: 0.9em; }
+.bar { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+.bar label { font-size: 0.9rem; color: var(--muted); display: inline-flex; gap: 8px; align-items: center; }
+button { font: inherit; font-size: 0.88rem; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); cursor: pointer; }
+button:hover { border-color: var(--scl); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--scl); outline-offset: 2px; }
+button.primary { background: var(--scl-bg); border-color: var(--scl); color: var(--scl-ink); font-weight: 600; }
+.yaml { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; min-width: 0; flex: 1 1 420px; }
+.yaml code { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; overflow-x: auto; white-space: nowrap; max-width: 100%; min-width: 0; }
+input[type=number] { width: 5.6em; font-family: var(--mono); font-size: 0.9rem; padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: var(--fg); }
+input[type=range] { width: 100%; accent-color: var(--scl); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; display: grid; gap: 10px; min-width: 0; }
+.card h3 { margin: 0; font-size: 1rem; display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.card h3 small { font-weight: 400; color: var(--muted); font-size: 0.8rem; }
+.ctl { display: grid; grid-template-columns: auto 1fr auto; gap: 6px 10px; align-items: center; font-size: 0.86rem; }
+.ctl span { color: var(--muted); }
+.scale { width: 100%; height: auto; display: block; color: var(--fg); }
+.kv { display: grid; grid-template-columns: 1fr auto; gap: 3px 12px; font-size: 0.86rem; font-variant-numeric: tabular-nums; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; font-family: var(--mono); font-size: 0.84rem; text-align: right; }
+.kv .sep { grid-column: 1 / -1; border-top: 1px solid var(--line); margin: 4px 0; }
+.flag { font-size: 0.8rem; padding: 2px 8px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
+.flag.hi { color: var(--warn); border-color: var(--warn); }
+.flag.mid { color: var(--scl-ink); border-color: var(--scl); }
+.flag.lo { color: var(--ok); border-color: var(--ok); }
+.note { font-size: 0.8rem; color: var(--muted); }
+.reason { display: grid; gap: 14px; }
+.reason ol { margin: 0; padding-left: 1.3em; display: grid; gap: 8px; max-width: 80ch; }
+.callout { border-left: 3px solid var(--warn); padding: 6px 0 6px 14px; max-width: 80ch; }
+.v-tick { stroke: var(--act); stroke-width: 2; }
+.v-lab { font-family: var(--sans); font-size: 10px; fill: var(--muted); }
+.v-axis { stroke: var(--line); stroke-width: 1; }
+.v-cap { fill: var(--scl-bg); stroke: var(--scl); stroke-width: 1.2; }
+.v-num { font-family: var(--mono); font-size: 9.5px; fill: var(--muted); }
+.v-capl { font-family: var(--sans); font-size: 10px; font-weight: 600; fill: var(--scl-ink); }
+</style>
+
+<div class="wrap">
+  <header style="display:grid;gap:8px">
+    <h1>Action scale calculator, Station 3</h1>
+    <p class="lede">Set <code>agent.actor.action_scale</code> per joint and see what the residual can do in real units: radians per tick, per ACT chunk, and millimetres at the gripper, next to ACT's own step sizes from the training data. Numbers come from the delta dataset (55,177 frames), the RL scaler and the step-70016 eval logs.</p>
+  </header>
+
+  <div class="bar">
+    <label for="k">Make the cap
+      <input type="number" id="k" value="0.5" min="0.05" max="3" step="0.05">
+      × ACT's median step
+    </label>
+    <button class="primary" id="applyK" type="button">Apply to joints 0-5</button>
+    <button id="resetCur" type="button">Reset to the current config</button>
+    <div class="yaml">
+      <code id="yaml"></code>
+      <button id="copy" type="button">Copy</button>
+      <span id="copied" class="note" role="status"></span>
+    </div>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <section class="reason">
+    <h2>How the numbers are computed</h2>
+    <ol>
+      <li><strong>Exact.</strong> The box half-width is <code>he = half · (1 + s)</code>, with <code>half</code> fixed by the dataset (floored at 0.05). The residual's real size per tick is <code>r · he</code>, so the cap is <code>s · (1 + s) · half</code>. The helper solves <code>s² + s − k·median/half = 0</code>.</li>
+      <li><strong>Exact.</strong> Corrected ACT step = ACT's median step + cap, the same as <code>unscale(clip(scale(a) + s))</code> while the ±1 clip is inactive. It was inactive on 100% of eval ticks.</li>
+      <li><strong>Upper bound.</strong> Per chunk = 14 ticks × cap. ACT replays 14 actions open-loop and nothing in delta control undoes a deviation inside a chunk. At eval the residual kept one sign for the whole chunk in 56-82% of chunks.</li>
+      <li><strong>Measured estimate.</strong> Realized per chunk = β × chunk bound, where β is how much of a commanded residual radian the follower actually moved. β comes from a per-joint fit on the step-70016 evals (R² shown on each card). Joint 4's fit is poor and should not be relied on.</li>
+      <li><strong>Measured estimate.</strong> mm at the gripper = rad × the joint's gripper sensitivity, fitted from the dataset's joint angles and gripper positions (R² 0.96-0.997). It is shown as a range over arm poses, for that joint moving alone. Joint 5 is the wrist roll and barely moves the gripper position.</li>
+      <li><strong>Noise.</strong> Exploration noise is <code>N(0, stddev)</code> in the same normalized units, so its real 3σ is <code>3 · stddev · he</code>. Compare it with the cap: noise much larger than the cap means the critic mostly sees noise on that joint.</li>
+    </ol>
+    <div class="callout"><strong>Before running with a new action_scale:</strong> <code>action_scale</code> changes <code>he</code>, and so changes every normalized action stored in the replay buffers. It is not part of either buffer cache key yet. Add it to both keys, or move the old caches away, so old buffers are not reused with the wrong box.</div>
+    <p class="note">These step statistics cover the whole task. For insertion-only RL, recompute <code>half</code> and the median step from the insertion frames: the steps there are smaller, so the same <code>s</code> gives a larger cap relative to ACT.</p>
+  </section>
+</div>
+
+<script>
+const J = [
+  { name: "Joint 0", role: "base yaw" },
+  { name: "Joint 1", role: "shoulder" },
+  { name: "Joint 2", role: "elbow" },
+  { name: "Joint 3", role: "wrist 1" },
+  { name: "Joint 4", role: "wrist 2" },
+  { name: "Joint 5", role: "wrist roll" },
+  { name: "Gripper", role: "absolute, m" },
+];
+// dataset (delta, 55,177 frames): half range after the 0.05 floor, median / q90 / q99 |a| per tick
+const HALF = [0.07362, 0.14172, 0.14553, 0.12112, 0.06409, 0.21401, 0.05];
+const MID  = [0.00496, -0.03262, -0.02346, -0.00820, 0.00343, -0.01907, 0.022];
+const Q50  = [0.00381, 0.01297, 0.01373, 0.00649, 0.00229, 0.00534, null];
+const Q90  = [0.02365, 0.06332, 0.06752, 0.05035, 0.01030, 0.03510, null];
+const Q99  = [0.04883, 0.12636, 0.10910, 0.08888, 0.02747, 0.12131, null];
+// eval fit (step 70016): realized fraction of commanded residual, and its R^2
+const BETA = [0.221, 0.108, 0.195, 0.386, 0.047, 0.287, null];
+const R2   = [0.86, 0.73, 0.89, 0.98, 0.29, 0.97, null];
+// dataset fit: mm of gripper position per rad of this joint (range over arm poses)
+const MM   = [[247.5, 400.0], [255.1, 391.5], [355.5, 423.3], [232.4, 251.5], [174.1, 187.1], [0.18, 2.25], null];
+const CUR_S  = [0.15, 0.15, 0.15, 0.05, 0.05, 0.05, 0.1];
+const CUR_SD = [0.015, 0.015, 0.015, 0.03, 0.03, 0.03, 0.0125];
+const CHUNK = 14;
+
+let S = CUR_S.slice(), SD = CUR_SD.slice();
+const deg = r => r * 180 / Math.PI;
+const f = (x, d = 4) => (x === null || !isFinite(x)) ? "–" : x.toFixed(d);
+const signed = (x, d = 4) => (x >= 0 ? "+" : "−") + Math.abs(x).toFixed(d);
+
+function card(i) {
+  const g = i === 6;
+  return `<article class="card" id="card${i}" aria-labelledby="h${i}">
+    <h3 id="h${i}">${J[i].name} <small>${J[i].role}</small> <span class="flag" id="flag${i}"></span></h3>
+    <div class="ctl">
+      <span>s</span>
+      <input type="range" id="sr${i}" min="0" max="0.3" step="0.0005" aria-label="${J[i].name} action_scale slider">
+      <input type="number" id="sn${i}" min="0" max="0.3" step="0.0005" aria-label="${J[i].name} action_scale">
+      <span>stddev</span>
+      <span class="note">exploration noise (normalized)</span>
+      <input type="number" id="sd${i}" min="0" max="0.3" step="0.0005" aria-label="${J[i].name} exploration stddev">
+    </div>
+    ${g ? "" : `<svg class="scale" id="viz${i}" viewBox="0 0 320 64" role="img" aria-label="${J[i].name}: residual cap per tick against ACT's median, q90 and q99 step"></svg>`}
+    <dl class="kv" id="kv${i}"></dl>
+  </article>`;
+}
+
+function draw(i) {
+  const s = S[i], he = HALF[i] * (1 + s), cap = s * he;
+  const kv = document.getElementById("kv" + i), flag = document.getElementById("flag" + i);
+  const sigma3 = 3 * SD[i] * he;
+  if (i === 6) {
+    const physN = (0.04 - MID[6]) / he;
+    kv.innerHTML = `
+      <dt>box half-width he</dt><dd>${f(he, 4)} m</dd>
+      <dt>residual cap (absolute, not cumulative)</dt><dd>${f(cap * 1000, 2)} mm</dd>
+      <dt>physical range 4-40 mm in normalized units</dt><dd>±${f(physN, 3)}</dd>
+      <dt>noise 3σ</dt><dd>${f(sigma3 * 1000, 2)} mm</dd>
+      <div class="sep"></div>
+      <dt class="note" style="grid-column:1/-1">The gripper is an absolute position, so its residual offsets the target by at most the cap and never accumulates.</dt>`;
+    flag.textContent = ""; flag.className = "flag";
+    return;
+  }
+  const ratio = cap / Q50[i];
+  const corrected = Q50[i] + cap;
+  const chunk = CHUNK * cap, real = BETA[i] * chunk;
+  const mmTick = [cap * MM[i][0], cap * MM[i][1]], mmChunk = [chunk * MM[i][0], chunk * MM[i][1]], mmReal = [real * MM[i][0], real * MM[i][1]];
+  const headroom = 1 - 1 / (1 + s);
+  kv.innerHTML = `
+    <dt>box half-width he = half·(1+s)</dt><dd>${f(he, 5)} rad</dd>
+    <dt>ACT step, median / q90</dt><dd>${f(Q50[i], 5)} / ${f(Q90[i], 4)}</dd>
+    <dt><strong>residual cap per tick</strong></dt><dd><strong>${f(cap, 5)} rad</strong></dd>
+    <dt>cap / ACT median step</dt><dd>${f(ratio, 2)}×</dd>
+    <dt>corrected step (median + cap)</dt><dd>${f(corrected, 5)} rad = ${f(corrected / Q50[i], 2)}× ACT</dd>
+    <dt>cap per tick at the gripper</dt><dd>${f(mmTick[0], 1)}–${f(mmTick[1], 1)} mm</dd>
+    <div class="sep"></div>
+    <dt>per chunk, bound (14 × cap)</dt><dd>${f(chunk, 4)} rad · ${f(deg(chunk), 1)}°</dd>
+    <dt>at the gripper</dt><dd>${f(mmChunk[0], 1)}–${f(mmChunk[1], 1)} mm</dd>
+    <dt>per chunk, realized (β ${f(BETA[i], 3)}, R² ${f(R2[i], 2)})</dt><dd>${f(real, 4)} rad · ${f(mmReal[0], 1)}–${f(mmReal[1], 1)} mm</dd>
+    <dt>per second, bound (20 ticks)</dt><dd>${f(deg(20 * cap), 1)}°/s</dd>
+    <div class="sep"></div>
+    <dt>noise 3σ (real) / cap</dt><dd>${f(sigma3, 5)} rad · ${f(sigma3 / cap, 2)}×</dd>
+    <dt>dataset extremes sit at</dt><dd>±${f(1 / (1 + s), 3)} (headroom ${f(headroom, 3)})</dd>
+    ${R2[i] < 0.5 ? `<dt class="note" style="grid-column:1/-1">The realized-motion fit for this joint is poor (R² ${R2[i]}); use the bound, not the estimate.</dt>` : ""}
+    ${i === 5 ? `<dt class="note" style="grid-column:1/-1">Wrist roll: rotates the gripper; its position barely moves, so mm is near zero.</dt>` : ""}`;
+  flag.textContent = ratio >= 1 ? `${f(ratio, 1)}× ACT step` : ratio >= 0.5 ? `${f(ratio, 2)}× ACT step` : `${f(ratio, 2)}× ACT step`;
+  flag.className = "flag " + (ratio >= 1 ? "hi" : ratio >= 0.5 ? "mid" : "lo");
+
+  // scale strip: 0 .. max(q99, cap) in rad per tick
+  const svg = document.getElementById("viz" + i);
+  const W = 320, x0 = 10, x1 = 310, maxV = Math.max(Q99[i], cap) * 1.08;
+  const X = v => x0 + (x1 - x0) * v / maxV;
+  const tick = (v, label, y, anchor) => `<line x1="${X(v)}" y1="18" x2="${X(v)}" y2="40" class="v-tick"/>
+      <text x="${X(v)}" y="${y}" text-anchor="${anchor}" class="v-lab">${label}</text>`;
+  const anc = v => X(v) > W - 40 ? "end" : X(v) < 40 ? "start" : "middle";
+  svg.innerHTML = `
+    <line x1="${x0}" y1="29" x2="${x1}" y2="29" class="v-axis"/>
+    <rect x="${x0}" y="22" width="${Math.max(1, X(cap) - x0)}" height="14" rx="2" class="v-cap"/>
+    ${tick(Q50[i], "ACT median", 12, anc(Q50[i]))}
+    ${tick(Q90[i], "q90", 54, anc(Q90[i]))}
+    ${tick(Q99[i], "q99", 12, anc(Q99[i]))}
+    <text x="${x0}" y="62" class="v-num">0</text>
+    <text x="${x1}" y="62" text-anchor="end" class="v-num">${maxV.toFixed(4)} rad/tick</text>
+    <text x="${Math.min(X(cap) + 4, W - 70)}" y="49" class="v-capl">cap</text>`;
+}
+
+function yaml() {
+  document.getElementById("yaml").textContent =
+    `action_scale: [${S.map(v => +v.toFixed(4)).join(", ")}]   stddev_schedule: "[${SD.map(v => +v.toFixed(4)).join(",")}]"`;
+}
+
+function sync(i) {
+  document.getElementById("sr" + i).value = S[i];
+  document.getElementById("sn" + i).value = S[i];
+  document.getElementById("sd" + i).value = SD[i];
+  draw(i);
+}
+
+function all() { for (let i = 0; i < 7; i++) sync(i); yaml(); }
+
+document.getElementById("grid").innerHTML = J.map((_, i) => card(i)).join("");
+for (let i = 0; i < 7; i++) {
+  const set = v => { const x = Math.max(0, Math.min(0.3, +v || 0)); S[i] = x; sync(i); yaml(); };
+  document.getElementById("sr" + i).addEventListener("input", e => set(e.target.value));
+  document.getElementById("sn" + i).addEventListener("change", e => set(e.target.value));
+  document.getElementById("sd" + i).addEventListener("change", e => { SD[i] = Math.max(0, +e.target.value || 0); sync(i); yaml(); });
+}
+document.getElementById("applyK").addEventListener("click", () => {
+  const k = Math.max(0, +document.getElementById("k").value || 0);
+  for (let i = 0; i < 6; i++) { const c = k * Q50[i] / HALF[i]; S[i] = (-1 + Math.sqrt(1 + 4 * c)) / 2; }
+  all();
+});
+document.getElementById("resetCur").addEventListener("click", () => { S = CUR_S.slice(); SD = CUR_SD.slice(); all(); });
+document.getElementById("copy").addEventListener("click", () => {
+  const t = document.getElementById("yaml").textContent, out = document.getElementById("copied");
+  const sel = () => { const r = document.createRange(); r.selectNodeContents(document.getElementById("yaml")); const s = getSelection(); s.removeAllRanges(); s.addRange(r); out.textContent = "Selected; press Ctrl+C"; };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(() => out.textContent = "Copied", sel); else sel();
+});
+all();
+</script>
