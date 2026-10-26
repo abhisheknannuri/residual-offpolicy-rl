@@ -54,6 +54,8 @@ from trossen_real.infer_app.eval_session import EvalSession, EvalSessionError
 from trossen_real.infer_app.eval_writer import EvalWriter
 from trossen_real.infer_app.infer_loop import InferenceLoop
 from trossen_real.inference.intervention import InterventionManager
+from trossen_real.inference.stage_detector import StageDetector
+from trossen_real.rl.stage2_reset import CubeConfirm, make_follower
 from trossen_real.inference.policy_client import (
     IMAGE_ENCODINGS, ChunkedPolicyClient, PolicyClient, check_action_space_mismatch,
     check_camera_health,
@@ -103,6 +105,11 @@ class AppState:
         # `self.lock`: /api/health polls twice a second and must never block
         # behind a slow connect (camera startup takes ~1s).
         self.eval_sync_lock = threading.Lock()
+        # SARM stage/success detection (station config `stage_detector.enabled`).
+        self.stage_detector: StageDetector | None = None
+        # Stage-2 reset (station config reset.single.mode = stage2_*): the reset
+        # waits on this until the UI's "Cube placed" button (/api/cube_placed).
+        self.cube_confirm = CubeConfirm()
 
     @property
     def connected(self) -> bool:
@@ -156,6 +163,15 @@ INFER_EXTRA_LEROBOT_FEATURES = {
         "names": ["joint_0", "joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "gripper"],
     },
     "next.reward": {"dtype": "float32", "shape": (1,), "names": ["reward"]},
+}
+
+# Added to the recorded schema when the stage detector is on with record_stage.
+# Latest SARM result known at each tick: stage index (-1 before the first
+# result), its confidence, and whether the success rule holds.
+SARM_LEROBOT_FEATURES = {
+    "observation.sarm_stage": {"dtype": "int64", "shape": (1,), "names": ["stage"]},
+    "observation.sarm_stage_conf": {"dtype": "float32", "shape": (1,), "names": ["conf"]},
+    "observation.sarm_success": {"dtype": "bool", "shape": (1,), "names": ["success"]},
 }
 
 
@@ -271,7 +287,12 @@ def api_connect():
                           f"but '{config_name}' has command_space: '{config.control.command_space}'."
                 ), 400
 
-            follower = FollowerClient(config.follower_server_url)
+            # reset.single.mode: "normal" -> FollowerClient, "stage2_*" -> a
+            # Stage2ResetFollower whose reset waits for the UI's "Cube placed" button.
+            reset_mode = config.reset["single"].mode
+            follower = (FollowerClient(config.follower_server_url) if reset_mode == "normal"
+                        else make_follower(config.follower_server_url, reset_mode, confirm=state.cube_confirm))
+            logger.info("Reset mode: %s", config.reset["single"].mode)
             try:
                 follower.connect()
             except Exception as exc:
@@ -382,6 +403,40 @@ def api_connect():
             elif mismatch:
                 logger.warning("Proceeding despite action_space mismatch (force_action_space=true): %s", mismatch)
 
+            # SARM stage detector: opt-in via the station config, and REQUIRED to work
+            # when enabled (fails the connect, like the leader), so a run is never
+            # silently missing stage labels.
+            stage_detector = None
+            sd_cfg = config.stage_detector
+            if sd_cfg.enabled:
+                if sd_cfg.query_every:
+                    query_every = int(sd_cfg.query_every)
+                elif chunk_steps > 0:
+                    query_every = chunk_steps
+                else:
+                    query_every = int(policy_health.get("n_action_steps") or 0)
+                if query_every <= 0:
+                    follower.disconnect()
+                    return jsonify(error="stage_detector.query_every is not set and the ACT chunk size is "
+                                         "unknown - set stage_detector.query_every in the station config."), 400
+                try:
+                    stage_detector = StageDetector(sd_cfg, query_every)
+                except Exception as exc:
+                    follower.disconnect()
+                    raise RuntimeError(
+                        f"stage_detector.enabled but the SARM reward server at {sd_cfg.server_url} "
+                        f"is not usable - is reward_server.py running? ({exc})"
+                    ) from exc
+                real_cams = {d.name for d in config.cameras.devices if d.serial}
+                missing = [c for c in stage_detector.camera_names if c not in real_cams]
+                if missing:
+                    stage_detector.close()
+                    follower.disconnect()
+                    return jsonify(error=f"the SARM model needs cameras {missing}, which are not real "
+                                         f"cameras (with a serial) in this station config"), 400
+                logger.info("SARM stage detector ON: %s, query every %d ticks, cameras %s, stages %s",
+                            sd_cfg.server_url, query_every, stage_detector.camera_names, stage_detector.stage_names)
+
             cameras = CameraManager(config)
             cameras.start()
             time.sleep(1.0)  # let the camera threads produce their first real frames
@@ -420,9 +475,10 @@ def api_connect():
             dataset_recorder = None
             episode_monitor = None
             if enable_dataset_recording:
-                dataset_recorder = DatasetRecorder(
-                    config, save_root=DATASET_DIR, extra_features=INFER_EXTRA_LEROBOT_FEATURES,
-                )
+                extra = dict(INFER_EXTRA_LEROBOT_FEATURES)
+                if stage_detector is not None and sd_cfg.record_stage:
+                    extra.update(SARM_LEROBOT_FEATURES)
+                dataset_recorder = DatasetRecorder(config, save_root=DATASET_DIR, extra_features=extra)
             # Independent of the recorder: pedal episode-boundary control is
             # useful whenever there is a human watching, which is exactly the
             # eval case. With no recorder the frame reward simply goes unused -
@@ -437,6 +493,7 @@ def api_connect():
                 station_name=config.station_name,
                 image_encoding=image_encoding,
                 jpeg_quality=jpeg_quality,
+                stage_detector=stage_detector,
             )
 
             state.config = config
@@ -451,6 +508,7 @@ def api_connect():
             state.dataset_recorder = dataset_recorder
             state.episode_monitor = episode_monitor
             state.dataset_recording_enabled = enable_dataset_recording
+            state.stage_detector = stage_detector
 
             if eval_config is not None:
                 eval_root = str(EVAL_DIR) if EVAL_DIR is not None else eval_config.output_root
@@ -542,6 +600,7 @@ def _finalize_pending_eval_run(where: str) -> None:
 
 @app.route("/api/disconnect", methods=["POST"])
 def api_disconnect():
+    state.cube_confirm.cancel()  # release a stage-2 reset waiting for the cube
     with state.lock:
         if state.infer_loop is not None and state.infer_loop.is_running:
             state.infer_loop.stop()
@@ -583,9 +642,29 @@ def api_disconnect():
         state.dataset_recorder = None
         state.episode_monitor = None
         state.dataset_recording_enabled = False
+        if state.stage_detector is not None:
+            state.stage_detector.close()
+        state.stage_detector = None
         state.eval = None
         state.eval_writer = None
     return jsonify(status="ok")
+
+
+def _stage_detector_state() -> dict:
+    sd = state.stage_detector
+    if sd is None:
+        return {"enabled": False}
+    st = sd.status()
+    return {
+        **st.__dict__,
+        "stage_names": sd.stage_names,
+        "success_stage": sd.cfg.success_stage,
+        "target_stage": sd.cfg.target_stage,
+        "query_every": sd.query_every,
+        "consecutive": sd.cfg.consecutive,
+        "min_conf": sd.cfg.min_conf,
+        "server_url": sd.url,
+    }
 
 
 @app.route("/api/health", methods=["GET"])
@@ -630,6 +709,9 @@ def api_health():
         num_episodes=(state.dataset_recorder.num_episodes if state.dataset_recorder is not None else 0),
         dataset_dir=(str(state.dataset_recorder.session_dir) if state.dataset_recorder is not None and state.dataset_recorder.session_dir else None),
         stop_reason=snapshot.stop_reason,
+        stage_detector=_stage_detector_state(),
+        reset_mode=state.config.reset["single"].mode,
+        waiting_for_cube=state.cube_confirm.waiting,
         **{"eval": eval_state},
     )
 
@@ -747,11 +829,23 @@ def api_reset():
     return jsonify(status="ok", leader_synced=state.leader is not None)
 
 
+@app.route("/api/cube_placed", methods=["POST"])
+def api_cube_placed():
+    """Stage-2 reset: the cube is between the fingers - close the gripper and go on."""
+    err = _require_connected()
+    if err:
+        return err
+    if not state.cube_confirm.confirm():
+        return jsonify(error="No stage-2 reset is waiting for the cube."), 409
+    return jsonify(status="ok")
+
+
 @app.route("/api/stop_inference", methods=["POST"])
 def api_stop_inference():
     err = _require_connected()
     if err:
         return err
+    state.cube_confirm.cancel()  # a stage-2 reset waiting for the cube must not block the stop
     state.infer_loop.stop()
     _sync_eval_run_finished()
     return jsonify(status="ok")

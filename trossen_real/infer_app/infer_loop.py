@@ -71,6 +71,8 @@ from trossen_real.human_intervention.episode_boundary import EpisodeBoundaryMoni
 from trossen_real.infer_app.video_recorder import InferVideoRecorder
 from trossen_real.inference.intervention import InterventionManager
 from trossen_real.inference.policy_client import PolicyClient, TickLogger, build_observation, reconstruct_absolute_action
+from trossen_real.inference.stage_detector import StageDetector
+from trossen_real.rl.stage2_reset import leader_sync_joints
 from trossen_real.teleop.dataset_recorder import DatasetRecorder
 from trossen_real.teleop.follower_client import FollowerClient
 
@@ -93,7 +95,7 @@ class InferSnapshot:
     intervening: bool = False  # live pedal state (only meaningful when intervention_enabled)
     dataset_recording: bool = False  # whether this run is writing frames into a DatasetRecorder episode
     num_episodes: int = 0  # DatasetRecorder.num_episodes, if dataset recording is enabled
-    stop_reason: str | None = None  # why the run ended: "manual", "max_steps", "reset_pedal", "reward_release", or None while still running
+    stop_reason: str | None = None  # why the run ended: "manual", "max_steps", "reset_pedal", "reward_release", "sarm_success", or None while still running
 
 
 class InferenceLoop:
@@ -114,6 +116,7 @@ class InferenceLoop:
         station_name: str = "station",
         image_encoding: str = "raw",
         jpeg_quality: int = 95,
+        stage_detector: StageDetector | None = None,
     ) -> None:
         self.follower = follower
         self.cameras = cameras
@@ -129,6 +132,9 @@ class InferenceLoop:
         # GPU, is what sets the control rate.
         self.image_encoding = image_encoding
         self.jpeg_quality = jpeg_quality
+        # Optional SARM stage/success detection (stage_detector.py). None = off,
+        # behaviour exactly as before.
+        self.stage_detector = stage_detector
         self._thread: threading.Thread | None = None
         self._stop_requested = False
         self._lock = threading.Lock()
@@ -196,7 +202,11 @@ class InferenceLoop:
         if self.intervention is not None:
             logger.info("Syncing leader to the follower's post-reset position...")
             follower_state = self.follower.get_state()
-            self.intervention.sync_to_follower(follower_state["q"], self.leader_sync_goal_time_s)
+            # Stage-2 reset: gripper at the commanded close on the cube, not the
+            # measured cube width (see stage2_reset.leader_sync_joints).
+            self.intervention.sync_to_follower(
+                leader_sync_joints(self.follower, follower_state["q"]), self.leader_sync_goal_time_s
+            )
 
     def _run(
         self,
@@ -247,6 +257,8 @@ class InferenceLoop:
 
             logger.info("Resetting policy's internal action-chunk queue (fresh rollout)...")
             self.policy.reset()
+            if self.stage_detector is not None:
+                self.stage_detector.start_episode()
 
             if recorder is not None:
                 recorder.start_recording()
@@ -273,6 +285,15 @@ class InferenceLoop:
 
                 if video_recorder is not None:
                     video_recorder.write_frames(images)
+
+                # Non-blocking: appends this tick; a background thread queries the
+                # reward server every `query_every` ticks. `stage` is the latest
+                # result known at this tick (it lags by up to one query).
+                stage = None
+                if self.stage_detector is not None:
+                    self.stage_detector.push(step, images, follower_state["q"])
+                    stage = self.stage_detector.status()
+                sd_cfg = self.stage_detector.cfg if self.stage_detector is not None else None
 
                 obs = build_observation(follower_state, images, self.image_keys,
                                         self.image_encoding, self.jpeg_quality)
@@ -308,6 +329,8 @@ class InferenceLoop:
                 should_end, reason = (
                     episode_monitor.check_episode_end() if episode_monitor is not None else (False, None)
                 )
+                if not should_end and stage is not None and stage.success and sd_cfg.end_episode_on_success:
+                    should_end, reason = True, "sarm_success"
 
                 if recorder is not None:
                     # Same pre-action `follower_state` this tick already read (BEFORE
@@ -324,6 +347,15 @@ class InferenceLoop:
                         "acceleration": np.asarray(follower_state["accelerations"], dtype=np.float32),
                     }
                     frame_reward = episode_monitor.get_frame_reward() if episode_monitor is not None else 0.0
+                    if stage is not None and stage.success and sd_cfg.label_reward_on_success:
+                        frame_reward = max(frame_reward, 1.0)
+                    sarm_features = {}
+                    if stage is not None and sd_cfg.record_stage:
+                        sarm_features = {
+                            "observation.sarm_stage": [stage.stage if stage.stage is not None else -1],
+                            "observation.sarm_stage_conf": [stage.conf if stage.conf is not None else 0.0],
+                            "observation.sarm_success": [stage.success],
+                        }
                     # next.done is driven PURELY by next.reward here - True for every
                     # frame while the reward pedal marks success (WIDE, not just a
                     # single terminal tick - verified against the real reference
@@ -346,6 +378,7 @@ class InferenceLoop:
                             "observation.intervened": [intervened_now],
                             "observation.policy_action": np.asarray(policy_action, dtype=np.float32),
                             "next.reward": [frame_reward],
+                            **sarm_features,
                         },
                     )
 

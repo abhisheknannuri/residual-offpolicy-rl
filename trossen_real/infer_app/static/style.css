@@ -216,3 +216,24 @@ select, input[type="text"] {
 /* Pose number typed but not yet committed to the server - visible warning that
    what is shown differs from the recorded cursor. */
 #eval-pose-index.uncommitted { outline: 2px solid #c77700; }
+
+/* SARM stage panel (stage_detector) */
+#stage-panel { display: block; }
+#stage-current { font-size: 20px; margin-bottom: 6px; }
+.stage-name { font-weight: 600; }
+.stage-success {
+  display: inline-block; font-size: 22px; font-weight: 700; letter-spacing: 1px;
+  background: #204a2a; color: #80ff9c; border: 2px solid #4ade80;
+  border-radius: 6px; padding: 4px 14px; margin-bottom: 6px;
+}
+.stage-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.stage-chip { font-size: 13px; padding: 3px 8px; border-radius: 12px; border: 1px solid #444; color: #aaa; }
+.stage-chip.success-stage { border-style: dashed; }
+.stage-chip.target-stage { border-color: #ffb020; }
+.stage-chip.current { color: #fff; border-color: #4ade80; }
+.stage-chip.detected { background: #204a2a; }
+#stage-panel.hidden, .stage-success.hidden { display: none; }
+
+/* Stage-2 reset: waiting for the cube */
+#cube-panel { display: flex; align-items: center; gap: 12px; border: 2px solid #ffb020; }
+#cube-panel.hidden { display: none; }

@@ -61,6 +61,20 @@
     <button id="reset-robot-btn" disabled title="Move the follower to the staged reset pose (and re-sync the leader if intervention is on). Disabled while inference is running.">Reset Robot</button>
   </section>
 
+  <!-- Stage-2 reset (reset.single.mode = stage2_*): shown while the reset waits for the cube. -->
+  <section id="cube-panel" class="panel hidden">
+    <b>Stage-2 reset: put the cube between the gripper fingers.</b>
+    <button id="cube-placed-btn" class="primary">Cube placed - close gripper</button>
+  </section>
+
+  <!-- SARM stage detection (station config stage_detector.enabled). Hidden when off. -->
+  <section id="stage-panel" class="panel hidden">
+    <div id="stage-current"></div>
+    <div id="stage-success" class="stage-success hidden">SUCCESS</div>
+    <div id="stage-chips" class="stage-chips"></div>
+    <div id="stage-detail" class="muted"></div>
+  </section>
+
   <section id="video-grid" class="video-grid"></section>
 
   <section id="status-panel" class="panel">

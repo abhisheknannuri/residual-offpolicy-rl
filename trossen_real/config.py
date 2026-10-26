@@ -185,11 +185,44 @@ class ResetConfig:
     # a reset can be a large jump - matches hil-serl's
     # `windowxai_follower_server.py::reset()`, which uses `goal_time=3.0`.
     goal_time_s: float = 3.0
+    # Which reset the apps use. "normal": the two-stage reset above (stage 0,
+    # cube on the table). "stage2_joint" / "stage2_ee" / "stage2_none": start in
+    # SARM stage 2 with the cube in the gripper, with joint / EE / no
+    # randomization - see trossen_real/rl/stage2_reset.py.
+    mode: str = "normal"
+
+
+RESET_MODES = ("normal", "stage2_joint", "stage2_ee", "stage2_none")
 
 
 @dataclass
 class DatasetConfig:
     save_root: str = "trossen_real/datasets"
+
+
+@dataclass
+class StageDetectorConfig:
+    """SARM stage/success detection in the inference app (see
+    `trossen_real/inference/stage_detector.py`). Off unless `enabled`."""
+
+    enabled: bool = False
+    # opensarm reward_server.py (the follower server uses 5060, the policy server 5070)
+    server_url: str = "http://127.0.0.1:5080"
+    # Query once every N control ticks; null = the ACT chunk size (policy_chunk_steps)
+    query_every: int | None = None
+    # A stage counts as detected when the last `consecutive` queries all predicted
+    # it with confidence > `min_conf`. Live: it stops counting as soon as a query
+    # breaks that.
+    consecutive: int = 2
+    min_conf: float = 0.85
+    success_stage: int = 4  # "cube inserted"
+    target_stage: int | None = None  # e.g. 2 "cube above the hole"; shown in the UI only
+    # Write observation.sarm_stage / sarm_stage_conf / sarm_success per frame
+    record_stage: bool = True
+    # Off: watch it in the UI first
+    label_reward_on_success: bool = False  # next.reward/next.done = 1 while success
+    end_episode_on_success: bool = False  # stop the run (stop_reason "sarm_success")
+    request_timeout_s: float = 5.0
 
 
 @dataclass
@@ -203,6 +236,7 @@ class StationConfig:
     ee_bounds: dict[str, EEBounds]  # side -> bounds
     reset: dict[str, ResetConfig]  # side -> reset config
     dataset: DatasetConfig
+    stage_detector: StageDetectorConfig = field(default_factory=StageDetectorConfig)
     # Where `follower_single_server.py` (the standalone follower-only Flask server)
     # is reachable for this station. The teleop data-collection app talks to
     # it over HTTP instead of owning the follower connection itself.
@@ -356,6 +390,9 @@ def load_station_config(name_or_path: str) -> StationConfig:
     }
 
     reset = {side: ResetConfig(**v) for side, v in raw["reset"].items()}
+    for side, r in reset.items():
+        if r.mode not in RESET_MODES:
+            raise ValueError(f"reset.{side}.mode must be one of {RESET_MODES}, got '{r.mode}' in {path}")
 
     dataset = DatasetConfig(**raw.get("dataset", {}))
 
@@ -369,6 +406,7 @@ def load_station_config(name_or_path: str) -> StationConfig:
         ee_bounds=ee_bounds,
         reset=reset,
         dataset=dataset,
+        stage_detector=StageDetectorConfig(**(raw.get("stage_detector") or {})),
         follower_server_url=str(raw.get("follower_server_url", "http://127.0.0.1:5060")),
         config_path=str(path),
     )

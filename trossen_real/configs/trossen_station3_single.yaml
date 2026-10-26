@@ -24,7 +24,8 @@ cameras:
     # serial: RealSense serial number. Leave "" to force a synthetic mock
     # feed for that slot (useful for developing/testing without hardware).
     - name: cam_high
-      serial: "420222071698"
+      # serial: "420222071698"
+      serial: ""
     - name: cam_right_wrist
       serial: "230322273819"
     - name: cam_left_wrist
@@ -34,8 +35,8 @@ cameras:
       # `resolution` above - frames the cube insertion task properly
       # instead of squashing the whole native FOV down uniformly.
       roi: [155, 200, 490, 410] # at robot sleep pose with gripper open 0.042
-    - name: cam_front
-      serial: ""
+    - name: cam_specialist
+      serial: "841612070978"
 
 control:
   frequency_hz: 20
@@ -90,6 +91,28 @@ reset:
     # Time (s) to reach the staged position / randomized EE target - slower
     # than regular teleop/policy moves is safer for a big reset jump.
     goal_time_s: 3.0
+    # normal       : the staged reset above (stage 0, cube on the table)
+    # stage2_joint : start in SARM stage 2, cube in the gripper, joint noise
+    # stage2_ee    : same, EE (xyz + angle) noise
+    # stage2_none  : same, no noise
+    # (stage-2 pose/noise constants: trossen_real/rl/stage2_reset.py)
+    mode: stage2_joint
 
 dataset:
   save_root: trossen_real/datasets
+
+# SARM stage / success detection in the inference app
+# (trossen_real/inference/stage_detector.py). Needs opensarm's reward_server.py
+# running with the Station 3 SARM config, e.g. on this laptop:
+#   reward_server.py --config config/sarm_Station3_PickCubeAndInsert.yaml --host 127.0.0.1 --port 5080 --device cuda:0
+stage_detector:
+  enabled: true
+  server_url: "http://127.0.0.1:5085"  # 5060 = follower server, 5070 = policy server
+  query_every: null        # ticks between queries; null = the ACT chunk size
+  consecutive: 2           # a stage counts once this many queries in a row predict it...
+  min_conf: 0.85           # ...each with confidence above this
+  success_stage: 4         # "cube inserted"
+  target_stage: null       # e.g. 2 ("cube above the hole"): shown in the UI only
+  record_stage: true       # observation.sarm_stage / sarm_stage_conf / sarm_success in recorded datasets
+  label_reward_on_success: true  # next.reward/next.done = 1 while success holds
+  end_episode_on_success: true   # end the run on success (stop_reason "sarm_success")

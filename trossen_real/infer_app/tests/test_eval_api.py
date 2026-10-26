@@ -87,7 +87,23 @@ class FakePolicy:
         return {"action": np.zeros(7, np.float32), "action_normalized": np.zeros(7, np.float32)}
 
 
+def _hardware_free_config(load):
+    """The real station config, made unable to reach hardware from these tests:
+    reset mode "normal" (a stage2_* mode builds a Stage2ResetFollower, which the
+    FakeFollower swap below does not cover and which talks to the real follower
+    server) and no SARM stage detector (it would need a running reward server)."""
+    def wrapped(name):
+        cfg = load(name)
+        for r in cfg.reset.values():
+            r.mode = "normal"
+        cfg.stage_detector.enabled = False
+        return cfg
+    return wrapped
+
+
 def install_fakes(monkey: dict):
+    monkey["load_station_config"] = appmod.load_station_config
+    appmod.load_station_config = _hardware_free_config(monkey["load_station_config"])
     monkey["FollowerClient"] = appmod.FollowerClient
     monkey["CameraManager"] = appmod.CameraManager
     monkey["PolicyClient"] = appmod.PolicyClient
@@ -101,6 +117,7 @@ def install_fakes(monkey: dict):
 
 
 def restore_fakes(monkey: dict):
+    appmod.load_station_config = monkey["load_station_config"]
     appmod.FollowerClient = monkey["FollowerClient"]
     appmod.CameraManager = monkey["CameraManager"]
     appmod.PolicyClient = monkey["PolicyClient"]

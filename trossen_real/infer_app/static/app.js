@@ -20,6 +20,8 @@ const els = {
   startInferBtn: document.getElementById("start-infer-btn"),
   stopInferBtn: document.getElementById("stop-infer-btn"),
   resetRobotBtn: document.getElementById("reset-robot-btn"),
+  cubePanel: document.getElementById("cube-panel"),
+  cubePlacedBtn: document.getElementById("cube-placed-btn"),
   videoGrid: document.getElementById("video-grid"),
   followerStatus: document.getElementById("follower-status"),
   policyStatus: document.getElementById("policy-status"),
@@ -27,6 +29,11 @@ const els = {
   inferStatus: document.getElementById("infer-status"),
   interventionStatus: document.getElementById("intervention-status"),
   datasetStatus: document.getElementById("dataset-status"),
+  stagePanel: document.getElementById("stage-panel"),
+  stageCurrent: document.getElementById("stage-current"),
+  stageSuccess: document.getElementById("stage-success"),
+  stageChips: document.getElementById("stage-chips"),
+  stageDetail: document.getElementById("stage-detail"),
   errorStatus: document.getElementById("error-status"),
 };
 
@@ -217,6 +224,14 @@ async function resetRobot() {
   }
 }
 
+async function cubePlaced() {
+  try {
+    await api("/api/cube_placed", { method: "POST", body: {} });
+  } catch (err) {
+    alert(`Cube placed: ${err.message}`);
+  }
+}
+
 async function stopInference() {
   try {
     await api("/api/stop_inference", { method: "POST" });
@@ -301,7 +316,11 @@ async function poll() {
     if (!h.inferring && h.stop_reason) {
       inferLine += ` - stopped via: ${h.stop_reason}`;
     }
+    if (h.reset_mode && h.reset_mode !== "normal") {
+      inferLine += ` - reset: ${h.reset_mode}`;
+    }
     els.inferStatus.innerHTML = `<span class="dot ${h.inferring ? "ok" : "idle"}"></span> ${inferLine}`;
+    els.cubePanel.classList.toggle("hidden", !h.waiting_for_cube);
 
     els.startInferBtn.disabled = h.inferring;
     els.stopInferBtn.disabled = !h.inferring;
@@ -331,12 +350,52 @@ async function poll() {
       els.interventionStatus.innerHTML = `<span class="dot idle"></span> Intervention: disabled for this session`;
     }
 
+    renderStage(h.stage_detector);
+
     // Hand the payload to eval.js. It owns its own DOM; nothing above this line
     // touches the eval panel, so operator input is never clobbered by polling.
     window.dispatchEvent(new CustomEvent("infer-health", { detail: h }));
   } catch (err) {
     console.error(err);
   }
+}
+
+// SARM stage detector: current stage, stage chips, SUCCESS badge.
+function renderStage(sd) {
+  if (!sd || !sd.enabled) {
+    els.stagePanel.classList.add("hidden");
+    return;
+  }
+  els.stagePanel.classList.remove("hidden");
+  const names = sd.stage_names || [];
+  if (sd.stage === null || sd.stage === undefined) {
+    els.stageCurrent.innerHTML = `<span class="stage-name muted">stage: none yet</span>`;
+  } else {
+    els.stageCurrent.innerHTML =
+      `<span class="stage-name">${sd.stage}: ${sd.stage_name}</span>` +
+      ` <span class="muted">conf ${sd.conf.toFixed(2)}</span>`;
+  }
+  els.stageSuccess.classList.toggle("hidden", !sd.success);
+  els.stageChips.innerHTML = names.map((n, i) => {
+    const cls = ["stage-chip"];
+    if (i === sd.stage) cls.push("current");
+    if (i === sd.detected_stage) cls.push("detected");
+    if (i === sd.success_stage) cls.push("success-stage");
+    if (i === sd.target_stage) cls.push("target-stage");
+    return `<span class="${cls.join(" ")}">${i}: ${n}</span>`;
+  }).join("");
+  const parts = [
+    `query every ${sd.query_every} ticks`,
+    `detected = ${sd.consecutive} queries in a row with conf > ${sd.min_conf}`,
+    `${sd.queries} queries`,
+  ];
+  if (sd.stage_tick !== null && sd.stage_tick !== undefined) parts.push(`latest for tick ${sd.stage_tick}`);
+  if (sd.last_latency_s) parts.push(`${(sd.last_latency_s * 1000).toFixed(0)} ms`);
+  if (sd.target_stage !== null && sd.target_stage !== undefined) {
+    parts.push(`target stage ${sd.target_stage}: ${sd.target_active ? "ACTIVE" : "not yet"}`);
+  }
+  els.stageDetail.innerHTML = parts.join(" · ") +
+    (sd.error ? ` · <span class="error-text">${sd.error}</span>` : "");
 }
 
 function startPolling() {
@@ -354,6 +413,7 @@ els.disconnectBtn.addEventListener("click", disconnect);
 els.startInferBtn.addEventListener("click", startInference);
 els.stopInferBtn.addEventListener("click", stopInference);
 els.resetRobotBtn.addEventListener("click", resetRobot);
+els.cubePlacedBtn.addEventListener("click", cubePlaced);
 
 setConnectedUi(false);
 loadStations();
