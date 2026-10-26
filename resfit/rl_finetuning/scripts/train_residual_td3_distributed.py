@@ -709,6 +709,16 @@ def _make_get_envs(cfg):
                 logger.info("[env] 3f: pedal ready (healthy=%s)", pedal.is_healthy())
 
             real_image_keys, real_policy_image_keys = camera_keys(cfg)
+            # SARM success detection from the station config's `stage_detector` block
+            # (None when disabled). Raises if enabled but the SARM server is unusable.
+            from trossen_real.inference.stage_detector import make_stage_detector
+
+            try:
+                stage_detector = make_stage_detector(station_config, cfg.policy_chunk_steps, policy_health)
+            except Exception:
+                cameras.stop()
+                follower.disconnect()
+                raise
             reset_cfg = station_config.reset["single"]
             return TrossenResidualEnv(
                 follower=follower,
@@ -736,6 +746,7 @@ def _make_get_envs(cfg):
                 policy_image_encoding=cfg.policy_image_encoding,
                 policy_jpeg_quality=cfg.policy_jpeg_quality,
                 policy_image_keys=real_policy_image_keys,
+                stage_detector=stage_detector,
             )
 
         # Build the stage-aware reward-model config (training env only). Passed as a

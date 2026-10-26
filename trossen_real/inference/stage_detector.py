@@ -205,3 +205,42 @@ class StageDetector:
         st.queries += 1
         st.history = (st.history + [{"tick": tick, "stage": stage, "conf": round(conf, 3),
                                      "success": st.success}])[-self.HISTORY:]
+
+
+def make_stage_detector(station_config, policy_chunk_steps: int, policy_health: dict) -> StageDetector | None:
+    """The StageDetector for a station config's `stage_detector` block, or None if
+    it is disabled. Used by the RL trainers (the infer app has the same logic
+    inline in /api/connect). Raises if it is enabled but unusable, so a run never
+    silently goes without SARM success detection.
+
+    query_every: the block's value, else the ACT chunk size (`policy_chunk_steps`
+    if > 0, else the policy server's n_action_steps).
+    """
+    sd_cfg = station_config.stage_detector
+    if not sd_cfg.enabled:
+        return None
+    if sd_cfg.query_every:
+        query_every = int(sd_cfg.query_every)
+    elif policy_chunk_steps and policy_chunk_steps > 0:
+        query_every = int(policy_chunk_steps)
+    else:
+        query_every = int(policy_health.get("n_action_steps") or 0)
+    if query_every <= 0:
+        raise ValueError("stage_detector.query_every is not set and the ACT chunk size is unknown - "
+                         "set stage_detector.query_every in the station config")
+    try:
+        det = StageDetector(sd_cfg, query_every)
+    except Exception as exc:
+        raise RuntimeError(f"stage_detector.enabled but the SARM reward server at {sd_cfg.server_url} "
+                           f"is not usable - is reward_server.py running? ({exc})") from exc
+    real_cams = {d.name for d in station_config.cameras.devices if d.serial}
+    missing = [c for c in det.camera_names if c not in real_cams]
+    if missing:
+        det.close()
+        raise ValueError(f"the SARM model needs cameras {missing}, which are not real cameras (with a "
+                         f"serial) in the station config")
+    logger.info("SARM stage detector ON: %s, query every %d ticks, success = stage %d in %d queries "
+                "with conf > %.2f, label_reward=%s end_episode=%s", sd_cfg.server_url, query_every,
+                sd_cfg.success_stage, sd_cfg.consecutive, sd_cfg.min_conf,
+                sd_cfg.label_reward_on_success, sd_cfg.end_episode_on_success)
+    return det

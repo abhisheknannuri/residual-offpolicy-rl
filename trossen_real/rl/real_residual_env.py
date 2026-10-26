@@ -107,6 +107,7 @@ class TrossenResidualEnv:
         policy_image_encoding: str = "raw",
         policy_jpeg_quality: int = 95,
         policy_image_keys: list[str] | None = None,
+        stage_detector=None,
     ) -> None:
         self.follower = follower
         self.cameras = cameras
@@ -119,6 +120,10 @@ class TrossenResidualEnv:
         # Cameras sent to the base policy (ACT). None = the same as image_keys
         # (the RL cameras), i.e. the behaviour before this option existed.
         self.policy_image_keys = list(policy_image_keys) if policy_image_keys is not None else list(image_keys)
+        # SARM success detection (trossen_real/inference/stage_detector.py), from the
+        # station config's `stage_detector` block. None = rewards/episode ends come from
+        # the pedals only (behaviour before this existed). See step() for the rules.
+        self.stage_detector = stage_detector
         self.action_space_name = action_space
         self.leader = leader
         self.pedal = pedal
@@ -265,6 +270,11 @@ class TrossenResidualEnv:
 
         follower_state = self.follower.get_state()
         images = self.cameras.get_all_latest()
+        if self.stage_detector is not None:
+            # New SARM session (drops any result still in flight from the last episode),
+            # then this episode's first frame.
+            self.stage_detector.start_episode()
+            self.stage_detector.push(0, images, follower_state["q"])
         raw_obs = self._build_actor_obs(follower_state, images)
         base_naction = self._query_base_action(follower_state, images)
         obs = self._augment_obs(raw_obs, base_naction)
@@ -374,6 +384,9 @@ class TrossenResidualEnv:
 
         follower_state_after = self.follower.get_state()
         images = self.cameras.get_all_latest()
+        if self.stage_detector is not None:
+            # Non-blocking: queued for the background SARM query (once per query_every ticks).
+            self.stage_detector.push(self._step_count + 1, images, follower_state_after["q"])
         next_raw_obs = self._build_actor_obs(follower_state_after, images)
         next_base_naction = self._query_base_action(follower_state_after, images)
         next_obs = self._augment_obs(next_raw_obs, next_base_naction)
@@ -392,6 +405,19 @@ class TrossenResidualEnv:
             reward_value = 0.0
             terminated_now = False
             stop_reason = None
+
+        # SARM success (station config stage_detector: label_reward_on_success /
+        # end_episode_on_success). The pedals win: if the reward pedal is held this step
+        # (reward 1, episode ends on its release) or the reset pedal ended the episode
+        # (reward 0, an abort), SARM changes nothing. Otherwise a detected success gives
+        # reward 1 and ends the episode (stop_reason "sarm_success"), the same as a
+        # reward-pedal press + release.
+        sarm = self.stage_detector.status() if self.stage_detector is not None else None
+        if sarm is not None and sarm.success and not (reward_value >= 1.0 or stop_reason == "reset_pedal"):
+            if self.stage_detector.cfg.label_reward_on_success:
+                reward_value = 1.0
+            if self.stage_detector.cfg.end_episode_on_success:
+                terminated_now, stop_reason = True, "sarm_success"
 
         reward = torch.tensor([reward_value], dtype=torch.float32, device=self.device)
         terminated = torch.tensor([terminated_now], dtype=torch.bool, device=self.device)
@@ -447,7 +473,11 @@ class TrossenResidualEnv:
                 terminated=terminated.item(),
                 truncated=truncated.item(),
                 buffer_done=buffer_done,
-                stop_reason=stop_reason,  # "reset_pedal" | "reward_release" | None (still running / no pedal)
+                stop_reason=stop_reason,  # "reset_pedal" | "reward_release" | "sarm_success" | None
+                sarm_stage=sarm.stage if sarm is not None else None,
+                sarm_conf=sarm.conf if sarm is not None else None,
+                sarm_success=sarm.success if sarm is not None else None,
+                sarm_error=sarm.error if sarm is not None else None,
                 executed_action=np.asarray(executed_action, dtype=np.float32),
                 stored_naction=stored_naction.detach().cpu().numpy(),
                 actor_proposed_action=combined_naction.detach().cpu().numpy(),
@@ -483,6 +513,11 @@ class TrossenResidualEnv:
         return next_obs, reward, terminated, truncated, info
 
     def close(self) -> None:
+        if self.stage_detector is not None:
+            try:
+                self.stage_detector.close()
+            except Exception:
+                pass
         if self.intervention is not None:
             try:
                 self.leader.disconnect(
