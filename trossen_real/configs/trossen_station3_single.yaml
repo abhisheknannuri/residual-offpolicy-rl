@@ -114,8 +114,14 @@ stage_detector:
   success_stage: 4         # "cube inserted"
   target_stage: null       # e.g. 2 ("cube above the hole"): shown in the UI only
   record_stage: true       # observation.sarm_stage / sarm_stage_conf / sarm_success in recorded datasets
-  label_reward_on_success: true  # next.reward/next.done = 1 while success holds
-  end_episode_on_success: true   # end the run on success (stop_reason "sarm_success")
+  # On a SARM success: reward 1 (label_reward_on_success) and end the episode
+  # (end_episode_on_success). RL env: one step gets reward 1 + done, then the reset.
+  # Infer app: reward 1 on every recorded frame while success holds; the run stops.
+  label_reward_on_success: true
+  end_episode_on_success: true
+  # RL env: before that success is stored, wait for the pedal - REWARD pedal = keep
+  # (reward 1, done), RESET pedal = override (reward 0, done = a failure).
+  confirm_success: true
   # Infer app + residual RL checkpoint: pure ACT until SARM confirms this stage
   # (residual_consecutive queries in a row with stage >= it and conf > residual_min_conf),
   # then the residual until the episode ends. null = residual for the whole episode.
