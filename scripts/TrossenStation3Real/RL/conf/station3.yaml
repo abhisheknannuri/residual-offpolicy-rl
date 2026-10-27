@@ -134,7 +134,7 @@ agent:
   device: cuda
   # 1e-6 for both actor and critic - deliberately small. The residual
   # rides on a frozen BC policy; large steps destabilise it.
-  actor_lr: 1e-06
+  actor_lr: 1e-05
   critic_lr: 1e-4
   critic_target_tau: 0.005
   stddev_clip: 0.3

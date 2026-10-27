@@ -191,6 +191,32 @@ def load_checkpoint(
     if "encoder_scheduler" in sched_states and hasattr(agent, "encoder_scheduler") and agent.encoder_scheduler is not None:
         agent.encoder_scheduler.load_state_dict(sched_states["encoder_scheduler"])
 
+    # Optimizer.load_state_dict() (and a scheduler's) also restores the learning rate
+    # the checkpoint was trained with. Set the configured one back, so changing
+    # agent.actor_lr / critic_lr and resuming (e.g. from critic_warmup_final) really
+    # uses the new value. A no-op when the config is unchanged. Done after the
+    # scheduler restore, which would otherwise put the old base_lrs back.
+    cfg_lrs = {"actor_opt": agent.cfg.actor_lr, "critic_opt": agent.cfg.critic_lr,
+               "encoder_opt": agent.cfg.critic_lr}
+    for name, lr in cfg_lrs.items():
+        opt = getattr(agent, name, None)
+        if opt is None or name not in opt_states:
+            continue
+        lr = float(lr)
+        sched = getattr(agent, name.replace("_opt", "_scheduler"), None)
+        old = opt.param_groups[0]["lr"]
+        if sched is None:
+            for group in opt.param_groups:
+                group["lr"] = lr
+        else:
+            # Mid-warmup: keep the warmup's progress, rescale it to the new target.
+            old_base = sched.base_lrs[0]
+            for group in opt.param_groups:
+                group["lr"] = group["lr"] * lr / old_base if old_base > 0 else lr
+            sched.base_lrs = [lr for _ in sched.base_lrs]
+        if abs(old - opt.param_groups[0]["lr"]) > 1e-12:
+            print(f"  {name}: checkpoint lr {old:g} -> {opt.param_groups[0]['lr']:g} (configured {lr:g})")
+
     global_step = ckpt.get("global_step", 0)
     success_rate = ckpt.get("success_rate")
     config = ckpt.get("config")
