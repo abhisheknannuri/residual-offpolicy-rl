@@ -232,6 +232,10 @@ class StageDetectorConfig:
     residual_from_stage: int | None = None
     residual_consecutive: int = 2
     residual_min_conf: float = 0.85
+    # RL env only: when SARM ends an episode as a success, wait for the operator
+    # before the reward is stored - reward pedal = keep (reward 1, done), reset
+    # pedal = override (reward 0, done: a failure). Needs the foot pedal.
+    confirm_success: bool = False
 
 
 @dataclass

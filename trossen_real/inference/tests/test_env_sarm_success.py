@@ -110,3 +110,75 @@ def test_frames_pushed_every_tick():
     for _ in range(3):
         step(env)
     assert det.pushed == [0, 1, 2, 3]
+
+
+# ---- operator confirmation (stage_detector.confirm_success) ------------------------
+
+class FakePedal:
+    """Stale presses before the prompt, then the operator's answer after `delay` polls."""
+
+    def __init__(self, answer, delay=3, stale_reset=True, stale_reward=True):
+        self.answer, self.delay = answer, delay
+        self.stale = {"reset": stale_reset, "reward": stale_reward}
+        self.polls = 0
+
+    def consume_reset(self):
+        if self.stale["reset"]:
+            self.stale["reset"] = False
+            return True
+        self.polls += 1
+        return self.answer == "reset" and self.polls > self.delay
+
+    def consume_reward_latched(self):
+        if self.stale["reward"]:
+            self.stale["reward"] = False
+            return True
+        return self.answer == "reward" and self.polls > self.delay
+
+    def is_healthy(self):
+        return True
+
+    def get_reward(self):  # read by the env's reset() after the episode ends
+        return 0
+
+
+def make_confirming(answer):
+    det = FakeDetector(success=True)
+    det.cfg.confirm_success = True
+    env, logged = make(det)
+    env.pedal = FakePedal(answer)
+    return env, logged
+
+
+def test_confirm_keep_with_reward_pedal():
+    env, logged = make_confirming("reward")
+    assert step(env) == (1.0, True, True)
+    assert logged[-1]["stop_reason"] == "sarm_success_confirmed"
+
+
+def test_confirm_override_with_reset_pedal():
+    env, logged = make_confirming("reset")
+    assert step(env) == (0.0, True, True)  # failure: reward 0, episode ends
+    assert logged[-1]["stop_reason"] == "sarm_success_overridden"
+
+
+def test_stale_presses_before_the_prompt_are_ignored():
+    # both pedals have a press pending from before the prompt; the answer comes later
+    env, logged = make_confirming("reset")
+    step(env)
+    assert env.pedal.polls > env.pedal.delay  # it waited for the new press
+    assert logged[-1]["stop_reason"] == "sarm_success_overridden"
+
+
+def test_confirm_needs_a_pedal():
+    from trossen_real.inference.tests.test_executed_action_storage import _Cameras, _Follower, _Policy, _scaler
+    from trossen_real.inference.tests.test_executed_action_storage import TrossenResidualEnv, StateStandardizer
+    det = FakeDetector(success=True)
+    det.cfg.confirm_success = True
+    with pytest.raises(ValueError, match="pedal"):
+        TrossenResidualEnv(
+            follower=_Follower(Q), cameras=_Cameras(), policy=_Policy([0.0] * 7), control=SimpleNamespace(
+                gripper_closed=0.004, gripper_open=0.04, goal_time_s=0.05, frequency_hz=1000),
+            reset_cfg=None, action_scaler=_scaler(), state_standardizer=StateStandardizer(torch.zeros(7), torch.ones(7)),
+            image_keys=["observation.images.cam"], camera_resolution=(8, 8), stage_detector=det,
+        )

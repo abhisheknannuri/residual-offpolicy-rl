@@ -124,6 +124,9 @@ class TrossenResidualEnv:
         # station config's `stage_detector` block. None = rewards/episode ends come from
         # the pedals only (behaviour before this existed). See step() for the rules.
         self.stage_detector = stage_detector
+        if stage_detector is not None and getattr(stage_detector.cfg, "confirm_success", False) and pedal is None:
+            raise ValueError("stage_detector.confirm_success needs the foot pedal (enable_intervention / pedal) - "
+                             "the reward / reset pedal is how a SARM success is kept or overridden")
         self.action_space_name = action_space
         self.leader = leader
         self.pedal = pedal
@@ -412,12 +415,24 @@ class TrossenResidualEnv:
         # (reward 0, an abort), SARM changes nothing. Otherwise a detected success gives
         # reward 1 and ends the episode (stop_reason "sarm_success"), the same as a
         # reward-pedal press + release.
+        # With stage_detector.confirm_success the operator decides before anything is
+        # stored: reward pedal = keep (as above, stop_reason "sarm_success_confirmed"),
+        # reset pedal = override (reward 0, episode ends as a failure,
+        # "sarm_success_overridden"). The arm holds still while waiting.
         sarm = self.stage_detector.status() if self.stage_detector is not None else None
         if sarm is not None and sarm.success and not (reward_value >= 1.0 or stop_reason == "reset_pedal"):
-            if self.stage_detector.cfg.label_reward_on_success:
-                reward_value = 1.0
-            if self.stage_detector.cfg.end_episode_on_success:
-                terminated_now, stop_reason = True, "sarm_success"
+            keep, reason = True, "sarm_success"
+            if getattr(self.stage_detector.cfg, "confirm_success", False):
+                keep = self._confirm_sarm_success()
+                reason = "sarm_success_confirmed" if keep else "sarm_success_overridden"
+            if keep:
+                if self.stage_detector.cfg.label_reward_on_success:
+                    reward_value = 1.0
+                if self.stage_detector.cfg.end_episode_on_success:
+                    terminated_now, stop_reason = True, reason
+            else:
+                reward_value = 0.0
+                terminated_now, stop_reason = True, reason
 
         reward = torch.tensor([reward_value], dtype=torch.float32, device=self.device)
         terminated = torch.tensor([terminated_now], dtype=torch.bool, device=self.device)
@@ -511,6 +526,34 @@ class TrossenResidualEnv:
             next_obs, _ = self.reset()
 
         return next_obs, reward, terminated, truncated, info
+
+    def _confirm_sarm_success(self) -> bool:
+        """Block until the operator confirms a SARM success on the pedal: reward pedal =
+        keep (True), reset pedal = override (False). Presses from before the prompt
+        are discarded. Not counted as tick time: the episode ends either way and the
+        reset clears the pacing state."""
+        self.pedal.consume_reset()
+        self.pedal.consume_reward_latched()
+        msg = ("SARM says SUCCESS (cube inserted). Is it? REWARD pedal = yes, keep it (reward 1) | "
+               "RESET pedal = no, override (failure, reward 0)")
+        logger.warning(msg)
+        print(f"\n>>> {msg}", flush=True)
+        t0 = last_note = time.time()
+        while True:
+            if self.pedal.consume_reset():
+                logger.warning("SARM success OVERRIDDEN by the operator (reset pedal) after %.1fs",
+                               time.time() - t0)
+                return False
+            if self.pedal.consume_reward_latched():
+                logger.warning("SARM success CONFIRMED by the operator (reward pedal) after %.1fs",
+                               time.time() - t0)
+                return True
+            if time.time() - last_note > 10.0:
+                last_note = time.time()
+                healthy = self.pedal.is_healthy()
+                print(f">>> still waiting for the pedal ({time.time() - t0:.0f}s)"
+                      + ("" if healthy else " - PEDAL NOT CONNECTED, reconnect it"), flush=True)
+            time.sleep(0.02)
 
     def close(self) -> None:
         if self.stage_detector is not None:
