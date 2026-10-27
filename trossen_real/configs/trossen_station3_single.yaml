@@ -57,7 +57,7 @@ control:
   # overshoot to 0.044262 on real hardware, faulting the arm ("Joint limit
   # exceeded"). Small margin here; adjust if your gripper's overshoot differs.
   gripper_open: 0.04
-  gripper_closed: 0.004
+  gripper_closed: 0.001
   # goal_time_s (used for every per-tick move) = goal_time_multiplier /
   # frequency_hz - matches Trossen's own `min_time_to_move_multiplier`
   # convention exactly (their default: 3.0/30Hz=0.1s). 2.0 here reproduces
