@@ -223,6 +223,15 @@ class StageDetectorConfig:
     label_reward_on_success: bool = False  # next.reward/next.done = 1 while success
     end_episode_on_success: bool = False  # stop the run (stop_reason "sarm_success")
     request_timeout_s: float = 5.0
+    # Infer app with a residual RL checkpoint: run the residual only from this SARM
+    # stage on (pure ACT before). None = the whole episode (behaviour before this
+    # option). It switches on once `residual_consecutive` queries in a row predict a
+    # stage >= residual_from_stage with confidence > residual_min_conf, and then
+    # stays on until the episode ends (a stage-2 residual was trained on everything
+    # after the first stage-2 detection, dips back to earlier stages included).
+    residual_from_stage: int | None = None
+    residual_consecutive: int = 2
+    residual_min_conf: float = 0.85
 
 
 @dataclass

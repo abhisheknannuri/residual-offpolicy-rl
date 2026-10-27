@@ -108,7 +108,7 @@ dataset:
 stage_detector:
   enabled: true
   server_url: "http://127.0.0.1:5085"  # 5060 = follower server, 5070 = policy server
-  query_every: null        # ticks between queries; null = the ACT chunk size
+  query_every: 5        # ticks between queries; null = the ACT chunk size
   consecutive: 2           # a stage counts once this many queries in a row predict it...
   min_conf: 0.85           # ...each with confidence above this
   success_stage: 4         # "cube inserted"
@@ -116,3 +116,10 @@ stage_detector:
   record_stage: true       # observation.sarm_stage / sarm_stage_conf / sarm_success in recorded datasets
   label_reward_on_success: true  # next.reward/next.done = 1 while success holds
   end_episode_on_success: true   # end the run on success (stop_reason "sarm_success")
+  # Infer app + residual RL checkpoint: pure ACT until SARM confirms this stage
+  # (residual_consecutive queries in a row with stage >= it and conf > residual_min_conf),
+  # then the residual until the episode ends. null = residual for the whole episode.
+  # 2 = "cube above the hole", for the stage-2 residual (run_2026-10-26_15-11-58...).
+  residual_from_stage: 2
+  residual_consecutive: 2
+  residual_min_conf: 0.85

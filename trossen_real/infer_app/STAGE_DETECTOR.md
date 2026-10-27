@@ -89,3 +89,33 @@ in every case.
 `trossen_real/inference/tests/test_stage_detector.py` (fake server): query
 cadence and payload, the consecutive/min_conf rule including clearing, stale
 results dropped on a new episode, errors reported instead of raised.
+
+## Residual RL from a SARM stage on
+
+With a residual RL checkpoint loaded (connect panel), the residual can be
+limited to the part of the task it was trained for:
+
+```yaml
+stage_detector:
+  residual_from_stage: 2      # null (default) = residual for the whole episode
+  residual_consecutive: 2
+  residual_min_conf: 0.85
+```
+
+- Pure ACT until `residual_consecutive` SARM queries in a row predict a stage
+  >= `residual_from_stage` with confidence > `residual_min_conf` (a stage-3
+  answer counts for a stage-2 gate). The RL network is not run while off.
+- Then the residual stays on until the episode ends, even if SARM later dips
+  back (a stage-2 residual was trained on everything after the first stage-2
+  detection, recoveries included). A new episode starts gated again.
+- Connect fails if `residual_from_stage` is set with a residual checkpoint but
+  the stage detector is disabled.
+- The stage panel shows "residual RL: ON / OFF, pure ACT (from stage N)"; the
+  residual tick log (`logs/residual/*.jsonl`) has `residual_active` per tick.
+- The reward server pins the first 10 frames of an episode to stage 0, so with
+  `query_every` < 10 the first queries say 0 and the residual can start no
+  earlier than ~2 queries after tick 10.
+
+Code: `StageDetector` (gate), `ResidualPolicyClient.residual_active`
+(passthrough), `InferenceLoop._run` (sets it per tick). Tests:
+`test_stage_detector.py`, `test_residual_gate_passthrough.py`.

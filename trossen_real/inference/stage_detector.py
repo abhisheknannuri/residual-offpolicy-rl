@@ -52,6 +52,10 @@ class StageStatus:
     detected_stage: int | None = None  # stage meeting the consecutive/min_conf rule, else None
     success: bool = False
     target_active: bool = False
+    # Residual-RL gate (residual_from_stage): None when not configured, else False until
+    # residual_consecutive queries in a row said stage >= residual_from_stage with
+    # conf > residual_min_conf, then True for the rest of the episode.
+    residual_active: bool | None = None
     queries: int = 0
     last_latency_s: float | None = None
     error: str | None = None
@@ -84,7 +88,8 @@ class StageDetector:
         # SARM camera keys -> CameraManager names
         self.camera_names = [c[len(IMAGE_PREFIX):] if c.startswith(IMAGE_PREFIX) else c
                              for c in health["camera_names"]]
-        for name, s in (("success_stage", cfg.success_stage), ("target_stage", cfg.target_stage)):
+        for name, s in (("success_stage", cfg.success_stage), ("target_stage", cfg.target_stage),
+                        ("residual_from_stage", cfg.residual_from_stage)):
             if s is not None and not 0 <= s < len(self.stage_names):
                 raise ValueError(f"stage_detector.{name}={s} but the model has stages 0..{len(self.stage_names) - 1}")
 
@@ -97,7 +102,8 @@ class StageDetector:
         self._session_id = ""
         self._first = True
         self._recent: list[tuple[int, float]] = []  # (stage, conf) of the last `consecutive` queries
-        self._status = StageStatus(enabled=True)
+        self._gate_recent: list[bool] = []  # residual gate: did the last residual_consecutive queries pass?
+        self._status = self._fresh_status()
         self._stop = False
         self._worker = threading.Thread(target=self._run, daemon=True, name="stage-detector")
         self._worker.start()
@@ -112,7 +118,8 @@ class StageDetector:
             self._pending_last_tick = -1
             self._batch = None
             self._recent.clear()
-            self._status = StageStatus(enabled=True)
+            self._gate_recent.clear()
+            self._status = self._fresh_status()
 
     def push(self, tick: int, images: dict[str, np.ndarray], joint_state) -> None:
         """Add one control tick. Missing cameras skip the frame (and are reported)."""
@@ -137,6 +144,10 @@ class StageDetector:
                 self._pending_frames.clear()
                 self._pending_states.clear()
                 self._cv.notify()
+
+    def _fresh_status(self) -> StageStatus:
+        return StageStatus(enabled=True,
+                           residual_active=None if self.cfg.residual_from_stage is None else False)
 
     def status(self) -> StageStatus:
         with self._lock:
@@ -202,6 +213,12 @@ class StageDetector:
         st.detected_stage = detected
         st.success = detected == self.cfg.success_stage
         st.target_active = self.cfg.target_stage is not None and detected == self.cfg.target_stage
+        if self.cfg.residual_from_stage is not None and not st.residual_active:
+            k_res = max(1, self.cfg.residual_consecutive)
+            ok = stage >= self.cfg.residual_from_stage and conf > self.cfg.residual_min_conf
+            self._gate_recent = (self._gate_recent + [ok])[-k_res:]
+            if len(self._gate_recent) == k_res and all(self._gate_recent):
+                st.residual_active = True  # latched until start_episode()
         st.queries += 1
         st.history = (st.history + [{"tick": tick, "stage": stage, "conf": round(conf, 3),
                                      "success": st.success}])[-self.HISTORY:]

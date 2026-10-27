@@ -173,6 +173,10 @@ class ResidualPolicyClient:
         self._log = ResidualTickLog(log_path) if log_path else None
 
         self.ticks = 0
+        # Set per tick by the infer loop when the station config gates the residual on a
+        # SARM stage (stage_detector.residual_from_stage). False = pure base action (ACT),
+        # the RL network is not run. True (default) = residual on, as before this existed.
+        self.residual_active = True
         self._used_raw = 0
         self._used_decoded = 0
         self.meta: dict[str, Any] = {}
@@ -347,6 +351,19 @@ class ResidualPolicyClient:
         base_real = np.asarray(base_res["action"], dtype=np.float64).reshape(-1)
         t_base = time.perf_counter()
 
+        if not self.residual_active:
+            # Gated off (SARM stage not reached yet): pass the base action through.
+            self.ticks += 1
+            if self._log:
+                self._log.write({"event": "tick", "i": self.ticks, "t": time.time(), "residual_active": False,
+                                 "base_action": base_real.tolist(), "action": base_real.tolist(),
+                                 "dt_base_ms": round((t_base - t0) * 1000, 3)})
+            out = dict(base_res)
+            out.update({"action": base_real.copy(), "base_action": base_real,
+                        "residual": np.zeros_like(base_real), "residual_abs_max": 0.0,
+                        "clipped_amount": 0.0, "residual_active": False})
+            return out
+
         with torch.no_grad():
             base_t = torch.as_tensor(base_real, dtype=torch.float32,
                                      device=self.device).unsqueeze(0)
@@ -391,6 +408,7 @@ class ResidualPolicyClient:
                 "clipped_amount": clipped,
                 "dt_base_ms": round((t_base - t0) * 1000, 3),
                 "dt_rl_ms": round((t_end - t_base) * 1000, 3),
+                "residual_active": True,
                 **qinfo,
             })
 
@@ -402,6 +420,7 @@ class ResidualPolicyClient:
             "residual_abs_max": float(np.abs(res_np).max()),
             "clipped_amount": clipped,
             "image_source": "raw" if raw_images is not None else "decoded",
+            "residual_active": True,
             **qinfo,
         })
         return out

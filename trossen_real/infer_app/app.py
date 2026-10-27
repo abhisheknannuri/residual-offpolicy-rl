@@ -436,6 +436,16 @@ def api_connect():
                                          f"cameras (with a serial) in this station config"), 400
                 logger.info("SARM stage detector ON: %s, query every %d ticks, cameras %s, stages %s",
                             sd_cfg.server_url, query_every, stage_detector.camera_names, stage_detector.stage_names)
+            # Residual RL gated on a SARM stage needs the detector; never run the residual
+            # everywhere by accident because it is off.
+            if residual_ckpt and sd_cfg.residual_from_stage is not None:
+                if stage_detector is None:
+                    follower.disconnect()
+                    return jsonify(error=f"stage_detector.residual_from_stage={sd_cfg.residual_from_stage} needs "
+                                         "stage_detector.enabled: true (SARM decides when the residual starts)."), 400
+                logger.info("Residual RL gated: pure ACT until SARM stage >= %d (%d queries, conf > %.2f), "
+                            "then residual until the episode ends", sd_cfg.residual_from_stage,
+                            sd_cfg.residual_consecutive, sd_cfg.residual_min_conf)
 
             cameras = CameraManager(config)
             cameras.start()
@@ -659,6 +669,8 @@ def _stage_detector_state() -> dict:
         **st.__dict__,
         "stage_names": sd.stage_names,
         "success_stage": sd.cfg.success_stage,
+        "residual_from_stage": sd.cfg.residual_from_stage,
+        "residual_loaded": hasattr(state.policy, "residual_active"),
         "target_stage": sd.cfg.target_stage,
         "query_every": sd.query_every,
         "consecutive": sd.cfg.consecutive,

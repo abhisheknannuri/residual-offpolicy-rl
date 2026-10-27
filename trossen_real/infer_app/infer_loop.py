@@ -305,6 +305,12 @@ class InferenceLoop:
                 # and would otherwise have to decode the wire payload back -
                 # giving the RL encoder a jpeg round-trip that training never
                 # applied.
+                # Residual RL gated on a SARM stage (stage_detector.residual_from_stage): pure ACT
+                # until SARM has confirmed that stage, then the residual for the rest of the
+                # episode. Ungated (None) leaves the residual client as it was.
+                if (stage is not None and stage.residual_active is not None
+                        and hasattr(self.policy, "residual_active")):
+                    self.policy.residual_active = bool(stage.residual_active)
                 result = self.policy.predict_full(obs, raw_images=images)  # {"action": real units, ...}
                 predicted = result["action"]
                 policy_action = reconstruct_absolute_action(

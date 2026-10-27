@@ -394,6 +394,11 @@ function renderStage(sd) {
   if (sd.target_stage !== null && sd.target_stage !== undefined) {
     parts.push(`target stage ${sd.target_stage}: ${sd.target_active ? "ACTIVE" : "not yet"}`);
   }
+  if (sd.residual_loaded) {
+    parts.push(sd.residual_active === null || sd.residual_active === undefined
+      ? "residual RL: ON (whole episode)"
+      : `residual RL: ${sd.residual_active ? "ON" : "OFF, pure ACT"} (from stage ${sd.residual_from_stage})`);
+  }
   els.stageDetail.innerHTML = parts.join(" · ") +
     (sd.error ? ` · <span class="error-text">${sd.error}</span>` : "");
 }

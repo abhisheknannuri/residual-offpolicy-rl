@@ -114,3 +114,35 @@ def test_server_error_reported_not_raised(monkeypatch):
     st = det.status()
     assert st.error and "unreachable" in st.error and st.stage is None
     det.close()
+
+
+# ---- residual-RL gate (stage_detector.residual_from_stage) -------------------------
+
+def _run_queries(det, n):
+    img = np.zeros((4, 4, 3), np.uint8)
+    seen = []
+    for t in range(n):
+        det.push(t, {"cam_specialist": img, "cam_left_wrist": img}, np.zeros(7))
+        deadline = time.time() + 2
+        while det.status().queries < t + 1 and time.time() < deadline:
+            time.sleep(0.005)
+        seen.append(det.status().residual_active)
+    return seen
+
+
+def test_residual_gate_off_when_not_configured(monkeypatch):
+    det, _ = make(monkeypatch, [(2, 0.99)] * 3, query_every=1)
+    assert _run_queries(det, 3) == [None, None, None]
+    det.close()
+
+
+def test_residual_gate_needs_consecutive_confident_stage_and_latches(monkeypatch):
+    # >= stage 2: a stage-3 answer counts too; low conf breaks the run; once on, a dip back stays on
+    script = [(1, 0.99), (2, 0.99), (2, 0.80), (3, 0.95), (2, 0.95), (1, 0.99), (0, 0.99)]
+    det, _ = make(monkeypatch, script, query_every=1,
+                  residual_from_stage=2, residual_consecutive=2, residual_min_conf=0.85)
+    assert det.status().residual_active is False  # gated, before any query
+    assert _run_queries(det, len(script)) == [False, False, False, False, True, True, True]
+    det.start_episode()
+    assert det.status().residual_active is False  # new episode: pure ACT again
+    det.close()
