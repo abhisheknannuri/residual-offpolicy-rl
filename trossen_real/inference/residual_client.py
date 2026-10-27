@@ -149,6 +149,35 @@ class ResidualTickLog:
             pass
 
 
+
+# Checkpoints saved by `python -m ...train_residual_td3_distributed` pickle its config
+# dataclasses (ResidualTD3TrossenRealDistConfig, DistConfig) as `__main__.<name>`, the
+# module name the trainer ran under. Loaded from any other process, `__main__` is that
+# process (e.g. the infer app) and the lookup fails. Resolve such names in the
+# trainer's module instead. (checkpoint.py now stores dataclass configs as plain
+# dicts, so new checkpoints do not need this.)
+_MAIN_CLASS_MODULE = "resfit.rl_finetuning.scripts.train_residual_td3_distributed"
+
+
+def _remap_main_pickle():
+    import importlib
+    import pickle
+    import types
+
+    class _Unpickler(pickle.Unpickler):
+        def find_class(self, module, name):
+            if module == "__main__":
+                try:
+                    return super().find_class(module, name)
+                except AttributeError:
+                    return getattr(importlib.import_module(_MAIN_CLASS_MODULE), name)
+            return super().find_class(module, name)
+
+    mod = types.ModuleType("remap_main_pickle")
+    mod.__dict__.update({k: getattr(pickle, k) for k in dir(pickle) if not k.startswith("__")})
+    mod.Unpickler = _Unpickler
+    return mod
+
 class ResidualPolicyClient:
     """Drop-in for `PolicyClient`: base BC action + learned residual."""
 
@@ -183,7 +212,7 @@ class ResidualPolicyClient:
         self._load(device, base_policy_assert)
 
     # -- loading -----------------------------------------------------------
-    def _load(self, device: str | None, assert_mode: str) -> None:
+    def _load(self, device: str | None, assert_mode: str) -> None:  # noqa: C901
         try:
             import torch
             from omegaconf import OmegaConf
@@ -202,7 +231,8 @@ class ResidualPolicyClient:
         if not self.checkpoint_path.exists():
             raise ResidualUnavailable(f"checkpoint not found: {self.checkpoint_path}")
 
-        ck = torch.load(self.checkpoint_path, map_location="cpu", weights_only=False)
+        ck = torch.load(self.checkpoint_path, map_location="cpu", weights_only=False,
+                        pickle_module=_remap_main_pickle())
         dep = ck.get("deployment")
         if not dep:
             raise ResidualUnavailable(

@@ -125,8 +125,15 @@ def save_checkpoint(
         try:
             from omegaconf import OmegaConf
 
+            import dataclasses
+
             if hasattr(config, "_metadata"):  # Check if it's an OmegaConf object
                 checkpoint_data["config"] = OmegaConf.to_container(config, resolve=True)
+            elif dataclasses.is_dataclass(config):
+                # A config dataclass would be pickled by class reference - for the
+                # distributed trainer that is `__main__.ResidualTD3TrossenRealDistConfig`,
+                # which no other process can import. Store a plain dict instead.
+                checkpoint_data["config"] = OmegaConf.to_container(OmegaConf.structured(config), resolve=True)
             else:
                 checkpoint_data["config"] = config
         except ImportError:
