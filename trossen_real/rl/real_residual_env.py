@@ -256,13 +256,13 @@ class TrossenResidualEnv:
         # the arm is still physically settling from the staged-position move.
         time.sleep(self.settle_time_s)
 
-        if self.pedal is not None and self.pedal.get_reward():
-            logger.warning(
-                "Reward pedal is STILL held down at the start of a new episode (after the %.1fs settle "
-                "window) - if not released, the first transition(s) of this new episode will be "
-                "incorrectly marked reward=1. Release the reward pedal before the episode starts.",
-                self.settle_time_s,
-            )
+        # Fresh pedal state for the new episode, taken at the END of the reset: the drain
+        # at the top runs before a reset that can take many seconds (stage-2 reset: moves,
+        # cube prompt), so a press made during or just before it - e.g. the reward pedal
+        # that confirmed a SARM success, still held - would otherwise reach the new
+        # episode's first step as reward 1 and end it on the release.
+        if self.pedal is not None:
+            self._start_with_fresh_pedals()
         if self.pedal is not None and not self.pedal.is_healthy():
             logger.error(
                 "Foot pedal has lost its device connection (dummy mode / disconnected) - reward, reset, "
@@ -526,6 +526,23 @@ class TrossenResidualEnv:
             next_obs, _ = self.reset()
 
         return next_obs, reward, terminated, truncated, info
+
+    def _start_with_fresh_pedals(self) -> None:
+        """Wait until the reward and reset pedals are up, then discard every press
+        recorded so far and restart the episode monitor's tracking. Skipped while the
+        pedal is disconnected (its frozen state could otherwise block forever)."""
+        if self.pedal.is_healthy():
+            told = False
+            while self.pedal.get_reward() or getattr(self.pedal, "reset_pressed", False):
+                if not told:
+                    told = True
+                    logger.warning("A foot pedal is still held - waiting for its release before the episode starts.")
+                    print(">>> Release the foot pedal(s): the next episode starts when they are up.", flush=True)
+                time.sleep(0.02)
+        self.pedal.consume_reset()
+        self.pedal.consume_reward_latched()
+        if self.episode_monitor is not None:
+            self.episode_monitor.start_episode()  # nothing left to drain; resets its own tracking
 
     def _confirm_sarm_success(self) -> bool:
         """Block until the operator confirms a SARM success on the pedal: reward pedal =

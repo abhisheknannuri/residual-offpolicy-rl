@@ -182,3 +182,75 @@ def test_confirm_needs_a_pedal():
             reset_cfg=None, action_scaler=_scaler(), state_standardizer=StateStandardizer(torch.zeros(7), torch.ones(7)),
             image_keys=["observation.images.cam"], camera_resolution=(8, 8), stage_detector=det,
         )
+
+
+# ---- pedal state must not leak into the next episode --------------------------------
+
+from trossen_real.human_intervention.episode_boundary import EpisodeBoundaryMonitor  # noqa: E402
+from trossen_real.human_intervention.pedal_listener import PedalListener  # noqa: E402
+
+
+class HeldPedal(PedalListener):
+    """The real PedalListener latch logic without a device. The reward pedal is held
+    (pressed to confirm) and released after `release_after` reads of it."""
+
+    def __init__(self, release_after=5):
+        self.reward_pressed, self._reward_latch = True, True
+        self.reset_pressed, self._reset_triggered = False, False
+        self.intervention_pressed = False
+        self._dummy_mode, self._dev = False, object()
+        self.reads, self.release_after = 0, release_after
+
+    def get_reward(self):
+        self.reads += 1
+        if self.reads > self.release_after:
+            self.reward_pressed = False
+        return super().get_reward()
+
+
+class OneSuccessDetector(FakeDetector):
+    def start_episode(self):
+        super().start_episode()
+        self.success = False  # the next episode has no success
+
+
+class ConfirmThenHoldPedal(HeldPedal):
+    """Pedal up when the SARM prompt appears; the operator presses the reward pedal
+    during the prompt and keeps it down through the reset, releasing it after
+    `release_after` reads."""
+
+    def __init__(self, release_after=5):
+        super().__init__(release_after)
+        self.reward_pressed = self._reward_latch = False
+        self.polls = 0
+
+    def consume_reward_latched(self):
+        self.polls += 1
+        if self.polls == 3 and self.reads <= self.release_after:  # pressed during the prompt
+            self.reward_pressed = self._reward_latch = True
+        return super().consume_reward_latched()
+
+
+def test_confirm_press_does_not_leak_into_next_episode():
+    det = OneSuccessDetector(success=True)
+    det.cfg.confirm_success = True
+    env, logged = make(det)
+    env.pedal = ConfirmThenHoldPedal(release_after=5)
+    env.episode_monitor = EpisodeBoundaryMonitor(env.pedal)
+    env.episode_monitor.start_episode()
+    assert step(env) == (1.0, True, True)  # confirmed via the prompt, episode ends
+    assert logged[-1]["stop_reason"] == "sarm_success_confirmed"
+    # New episode: the press that confirmed must not give reward or end it.
+    for _ in range(3):
+        assert step(env) == (0.0, False, False)
+    assert not env.pedal.reward_pressed
+
+
+def test_reset_waits_for_held_pedal_then_starts_clean():
+    det = FakeDetector(success=False)
+    env, logged = make(det)
+    env.pedal = HeldPedal(release_after=10)
+    env.episode_monitor = EpisodeBoundaryMonitor(env.pedal)
+    env.reset()
+    assert env.pedal.reads > 10  # it waited for the release
+    assert step(env) == (0.0, False, False)
