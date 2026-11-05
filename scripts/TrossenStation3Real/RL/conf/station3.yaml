@@ -207,7 +207,7 @@ agent:
     # joints 0.1 (cap base 0.007, shoulder/elbow 0.014, wrist 0.008-0.013 rad/step,
     # about the demos' p90 speed), gripper 0.3 (cap 19.5 mm: the target can reach
     # ~23.5 mm from ACT's 4 mm hold, past the 11.4 mm cube, so it can release).
-    action_scale: [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.3]
+    action_scale: [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.15]
     num_layers: 2
     use_layer_norm: true
   critic_grad_clip_norm: 1.0
