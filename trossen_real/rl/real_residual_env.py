@@ -170,7 +170,8 @@ class TrossenResidualEnv:
         # A control object without `gripper_filter` (test fakes) means no filter.
         gf = getattr(control, "gripper_filter", None)
         self.gripper_filter = (
-            GripperFilter(gf.max_step, gf.confirm_ticks, (control.gripper_closed, control.gripper_open))
+            GripperFilter(gf.max_step, gf.confirm_ticks, (control.gripper_closed, control.gripper_open),
+                          open_gap=getattr(gf, "open_gap", None))
             if gf is not None else None
         )
 
@@ -375,7 +376,9 @@ class TrossenResidualEnv:
             )
         gripper_requested = float(executed_action[6])
         if self.gripper_filter is not None:
-            executed_action[6] = self.gripper_filter.step(gripper_requested, human=intervened_now)
+            executed_action[6] = self.gripper_filter.step(
+                gripper_requested, human=intervened_now, measured=float(follower_state_before["q"][6])
+            )
         # Store what was EXECUTED, not what was proposed: reconstruct_absolute_action()
         # clips the gripper to [gripper_closed, gripper_open], and the gripper filter
         # may hold or slow it, neither of which combined_naction shows. Joints 0-5 come
@@ -439,6 +442,7 @@ class TrossenResidualEnv:
         if sarm is not None and sarm.success and not (reward_value >= 1.0 or stop_reason == "reset_pedal"):
             keep, reason = True, "sarm_success"
             if getattr(self.stage_detector.cfg, "confirm_success", False):
+                self._hold_still(executed_action)
                 keep = self._confirm_sarm_success()
                 reason = "sarm_success_confirmed" if keep else "sarm_success_overridden"
             if keep:
@@ -562,6 +566,31 @@ class TrossenResidualEnv:
         self.pedal.consume_reward_latched()
         if self.episode_monitor is not None:
             self.episode_monitor.start_episode()  # nothing left to drain; resets its own tracking
+
+    def _hold_still(self, last_command: np.ndarray) -> None:
+        """Before the env stops sending commands (the SARM confirmation wait): one
+        command to stay where the arm is now.
+
+        Every step's move is "reach this target within goal_time_s (0.125 s)", and
+        normally the next step replaces it 50 ms later, before it ends. When the
+        commands stop, the last move runs to its end at full speed. Both gripper
+        faults of 2026-11-05 (14:30, 16:22: "Joint 6 position limit exceeded",
+        44.009 mm) were ~0.25 s after ACT's open to 40 mm with the fingers at
+        23-28 mm and no command after it: SARM had seen the cube inserted and the
+        env was waiting for the pedal. temp/gripper/gripper_overshoot_test.py
+        (`once` vs `oncehold`) measures it on the robot.
+
+        Joints: their measured positions. Gripper: the narrower of the last command
+        and the measured width - opening stops where the fingers are, a grip on the
+        cube (command narrower than the blocked fingers) is kept."""
+        q = np.asarray(self.follower.get_state()["q"], dtype=np.float32)
+        hold = q.copy()
+        hold[6] = min(float(last_command[6]), float(q[6]))
+        self.follower.move_to_joint_positions(hold, blocking=False, min_time_to_move=self.control.goal_time_s)
+        if self.gripper_filter is not None:
+            self.gripper_filter.reset(float(hold[6]))
+        logger.info("Holding still for the SARM confirmation: gripper %.1f mm (last command %.1f mm, fingers %.1f mm)",
+                    hold[6] * 1000, last_command[6] * 1000, q[6] * 1000)
 
     def _confirm_sarm_success(self) -> bool:
         """Block until the operator confirms a SARM success on the pedal: reward pedal =

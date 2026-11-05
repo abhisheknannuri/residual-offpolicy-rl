@@ -1,0 +1,68 @@
+[
+ {
+  "overshoot_mm": -5.967,
+  "peak_mm": 14.033,
+  "settle_s": 2.0,
+  "peak_speed_mm_s": 91.5,
+  "samples": 17486,
+  "sample_hz": 8743.3,
+  "method": "plain_oncehold",
+  "direction": "open",
+  "repeat": 0
+ },
+ {
+  "overshoot_mm": -6.19,
+  "peak_mm": 16.19,
+  "settle_s": 2.0,
+  "peak_speed_mm_s": 76.4,
+  "samples": 15223,
+  "sample_hz": 7611.5,
+  "method": "plain_oncehold",
+  "direction": "close",
+  "repeat": 0
+ },
+ {
+  "overshoot_mm": -5.987,
+  "peak_mm": 14.013,
+  "settle_s": 2.0,
+  "peak_speed_mm_s": 91.1,
+  "samples": 20417,
+  "sample_hz": 10208.8,
+  "method": "plain_oncehold",
+  "direction": "open",
+  "repeat": 1
+ },
+ {
+  "overshoot_mm": -5.906,
+  "peak_mm": 15.906,
+  "settle_s": 2.0,
+  "peak_speed_mm_s": 91.8,
+  "samples": 22634,
+  "sample_hz": 11317.4,
+  "method": "plain_oncehold",
+  "direction": "close",
+  "repeat": 1
+ },
+ {
+  "overshoot_mm": -5.99,
+  "peak_mm": 14.01,
+  "settle_s": 2.0,
+  "peak_speed_mm_s": 85.4,
+  "samples": 19380,
+  "sample_hz": 9690.9,
+  "method": "plain_oncehold",
+  "direction": "open",
+  "repeat": 2
+ },
+ {
+  "overshoot_mm": -5.899,
+  "peak_mm": 15.899,
+  "settle_s": 2.0,
+  "peak_speed_mm_s": 89.3,
+  "samples": 23881,
+  "sample_hz": 11940.6,
+  "method": "plain_oncehold",
+  "direction": "close",
+  "repeat": 2
+ }
+]

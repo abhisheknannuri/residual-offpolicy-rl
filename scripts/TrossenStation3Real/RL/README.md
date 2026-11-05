@@ -287,3 +287,55 @@ mirror, stored == sent). Replayed on the requests of the 14:17 session of
 
 **Reading the log.** The env's `real_log_file` now has `gripper_requested` (the
 width before the filter) next to `executed_action[6]` (what was sent).
+
+**Opening cap (`open_gap`, added after a second fault at 16:22).** With the speed
+limit in place the arm still faulted (44.009 mm): the command went 22 -> 28 -> 34
+-> 40 mm in three ticks while the fingers lagged at ~28 mm, so the motor was told
+to cover ~12 mm in one 0.125 s move and arrived too fast. The joints and the
+gripper go out in ONE `set_all_positions` call with one goal_time; the lag is
+the gripper motor's own response, not our code. Now, while opening, the command
+may be at most `control.gripper_filter.open_gap` (9 mm) wider than the measured
+fingers (`follower_state_before`). Closing is never capped: a held cube blocks
+the fingers at its width and that gap is the grip. 9 mm: the demos reach the top
+with the command up to 9.6 mm ahead and never faulted, but a 20 Hz log cannot
+see the overshoot spike, so the value is NOT proven safe. Measure it on the
+robot (follower_single_server.py stopped; only the gripper moves, 10-30 mm):
+
+```bash
+.venv/bin/python temp/gripper/gripper_overshoot_test.py --list     # methods, no robot
+.venv/bin/python temp/gripper/gripper_overshoot_test.py            # all, 3 repeats, ~3 min
+```
+
+It compares one-tick jumps, 6 mm/tick, 6 mm/tick with open_gap 3/6/9 mm, and
+the gripper sent alone (`set_gripper_position`, quintic goal_time 0.25/0.5 s),
+sampling the gripper at the SDK's rate. Read the table's opening overshoot: a
+method is safe at 40 mm if it stays well below 4 mm (the margin to 44 mm). Set
+`open_gap` from it.
+
+First run (`real_logs/overshoot_20261105_164535`, 10 <-> 30 mm, no cube): no
+method overshot (peak 29.95 mm, low 10.05 mm), a one-tick 20 mm jump included,
+so "fast arrival overshoots" is NOT confirmed. The script's default run now
+covers what the faults had and that run did not: opening to 34 mm (`top34_*`),
+and opening right after squeezing the cube at 1 mm (`squeeze_*`, you hold the
+cube; 16:22 opened after ~1 s squeezing at 12.1 mm). `--all` adds the plain
+cases.
+
+Second run (`overshoot_20261105_165514`): no overshoot at 34 mm or after a
+squeeze either. **Cause found in the fault logs:** both faults (14:30, 16:22)
+came ~0.25 s after ACT's open to 40 mm with the fingers at 23-28 mm, and the
+follower got NO command after it: SARM had seen the cube inserted and the env
+was waiting for the confirmation pedal. Normally the next step replaces each
+0.125 s move after 50 ms; with no next step the robot finishes that fast move
+alone and overshoots. The gripper filter cannot act then (it runs per step).
+**Fix:** `TrossenResidualEnv._hold_still()` sends one hold command before the
+wait (joints at their measured positions, gripper at the narrower of the last
+command and the measured width: an opening stops, a grip on the cube is kept).
+Test: `test_env_sarm_success.py::test_confirmation_wait_starts_with_a_hold_command`.
+Confirmed on the robot (run 2026-11-05 17:09, `once`: one 10 -> 30 mm command
+in 0.125 s, nothing after it): the fingers stopped at 37.95 mm, 8 mm past the
+target, and stayed there; the next command (1.5 s back to 30 mm) faulted the arm
+at 44.075 mm. With commands every 50 ms (the first two runs) the same moves end
+within 0.05 mm. `once` is removed from the script; `oncehold` (the fix) is
+available with `--only`, not in the default run. Any other gap in the 20 Hz
+command stream right after a large gripper move is the same risk. Logs and plots: `temp/gripper/real_logs/overshoot_<time>/`.
+Tests: `test_gripper_filter.py` covers the cap (63 tests).

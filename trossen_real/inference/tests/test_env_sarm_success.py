@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import torch
 
@@ -254,3 +255,37 @@ def test_reset_waits_for_held_pedal_then_starts_clean():
     env.reset()
     assert env.pedal.reads > 10  # it waited for the release
     assert step(env) == (0.0, False, False)
+
+
+# ---- the robot must not finish a fast move while the env waits for the pedal -------
+
+@pytest.mark.parametrize("act_gripper, fingers, expected", [
+    (0.040, 0.0235, 0.0235),  # ACT opening (the 14:30 fault): stop where the fingers are
+    (0.004, 0.0114, 0.004),   # gripping the cube (fingers blocked at its width): keep the grip
+])
+def test_confirmation_wait_starts_with_a_hold_command(act_gripper, fingers, expected):
+    env, logged = make_confirming("reward")
+    env.follower.q[6] = fingers
+    env.policy.action_real[6] = act_gripper
+    env._last_base_naction = env._query_base_action(env.follower.get_state(), {"cam": np.zeros((8, 8, 3), np.uint8)})
+    sends, during_wait = [], []
+    move = env.follower.move_to_joint_positions
+
+    def record(arr, blocking=False, min_time_to_move=None):
+        sends.append(np.asarray(arr, dtype=np.float32).copy())
+        move(arr, blocking=blocking, min_time_to_move=min_time_to_move)
+
+    env.follower.move_to_joint_positions = record
+    poll = env.pedal.consume_reward_latched
+
+    def watched_poll():
+        during_wait.append(len(sends))
+        return poll()
+
+    env.pedal.consume_reward_latched = watched_poll
+    step(env)
+    assert logged[-1]["stop_reason"] == "sarm_success_confirmed"
+    assert set(during_wait) == {2}, "the step's move, then the hold, then nothing while waiting"
+    assert sends[0][6] == pytest.approx(act_gripper, abs=1e-6)
+    np.testing.assert_allclose(sends[1][:6], np.asarray(Q[:6], np.float32), atol=1e-6)  # joints: measured
+    assert sends[1][6] == pytest.approx(expected, abs=1e-6)

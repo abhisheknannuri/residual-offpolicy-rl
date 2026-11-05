@@ -85,10 +85,13 @@ class GripperFilterConfig:
     max_step       m per tick the gripper command may change (any source)
     confirm_ticks  the policy's request must lie on the same side of the
                    command this many ticks in a row before it moves; 1 = off
+    open_gap       m: while opening, the command may be at most this much
+                   wider than the measured fingers; null = off
     """
 
     max_step: float = 0.006
     confirm_ticks: int = 3
+    open_gap: float | None = 0.009
 
 
 @dataclass
@@ -430,8 +433,9 @@ def load_station_config(name_or_path: str) -> StationConfig:
     gripper = GripperModeConfig(**(control_raw.pop("gripper", None) or {}))
     gripper_filter = GripperFilterConfig(**(control_raw.pop("gripper_filter", None) or {}))
     control = ControlConfig(**control_raw, gripper=gripper, gripper_filter=gripper_filter)
-    if not (gripper_filter.max_step > 0 and gripper_filter.confirm_ticks >= 1):
-        raise ValueError(f"control.gripper_filter needs max_step > 0 and confirm_ticks >= 1 in {path}")
+    if not (gripper_filter.max_step > 0 and gripper_filter.confirm_ticks >= 1
+            and (gripper_filter.open_gap is None or gripper_filter.open_gap > 0)):
+        raise ValueError(f"control.gripper_filter needs max_step > 0, confirm_ticks >= 1 and open_gap > 0 or null in {path}")
     if gripper.mode not in GRIPPER_MODES:
         raise ValueError(f"control.gripper.mode must be one of {GRIPPER_MODES}, got '{gripper.mode}' in {path}")
     if not (gripper.closed < gripper.close_below < gripper.open_above < gripper.open):

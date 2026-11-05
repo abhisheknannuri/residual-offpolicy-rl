@@ -33,16 +33,20 @@ STEP = 0.006
 EPS = 1e-9
 
 
-def make(command_mm, confirm=3):
-    f = GripperFilter(max_step=STEP, confirm_ticks=confirm, limits=LIMITS)
+def make(command_mm, confirm=3, open_gap=None):
+    f = GripperFilter(max_step=STEP, confirm_ticks=confirm, limits=LIMITS,
+                      open_gap=None if open_gap is None else open_gap * MM)
     f.reset(command_mm * MM)
     return f
 
 
-def run(f, requests_mm, human=None):
-    """Feed requests (mm); returns the sent commands (mm)."""
+def run(f, requests_mm, human=None, measured_mm=None):
+    """Feed requests (mm), optionally with the measured finger width (mm);
+    returns the sent commands (mm)."""
     human = human or [False] * len(requests_mm)
-    return [round(f.step(r * MM, human=h) / MM, 6) for r, h in zip(requests_mm, human)]
+    measured_mm = measured_mm or [None] * len(requests_mm)
+    return [round(f.step(r * MM, human=h, measured=None if m is None else m * MM) / MM, 6)
+            for r, h, m in zip(requests_mm, human, measured_mm)]
 
 
 def max_jump(cmds_mm, start_mm):
@@ -216,21 +220,81 @@ def test_hand_back_ignores_the_policy_history_from_before_the_intervention():
 
 
 # ----------------------------------------------------------------------------
+# Opening cap: the command may not run more than open_gap ahead of the fingers
+# ----------------------------------------------------------------------------
+
+def test_opening_cap_holds_the_command_near_lagging_fingers():
+    """Fingers stuck at 12 mm, request 40: the command stops at 12 + 9 = 21."""
+    f = make(10, confirm=1, open_gap=9)
+    assert run(f, [40] * 5, measured_mm=[12] * 5) == pytest.approx([16, 21, 21, 21, 21])
+
+
+def test_opening_cap_follows_the_fingers_as_they_open():
+    f = make(10, confirm=1, open_gap=9)
+    assert run(f, [40] * 6, measured_mm=[10, 12, 16, 22, 28, 33]) == pytest.approx([16, 21, 25, 31, 37, 40])
+
+
+def test_the_16_22_fault_sequence_is_capped():
+    """2026-11-05 16:22: request 40 mm, fingers at 22.0 / 22.2 / 22.3 / 24.0 /
+    26.6 mm; the commands sent were 22.4, 22.4, 28.4, 34.4, 40.0 (the last one
+    ~12 mm ahead of the fingers). With the cap: never more than 9 mm ahead."""
+    f = make(22.4, confirm=1, open_gap=9)
+    meas = [21.95, 22.15, 22.25, 24.04, 26.60]
+    out = run(f, [40] * 5, measured_mm=meas)
+    assert all(o - m <= 9 + 1e-6 for o, m in zip(out, meas))
+    assert out == pytest.approx([28.4, 31.15, 31.25, 33.04, 35.6])
+
+
+def test_opening_cap_never_pulls_the_command_back():
+    """Command already 15 mm ahead (cap just switched on): it holds, it does
+    not drop toward the fingers."""
+    f = make(30, confirm=1, open_gap=9)
+    assert run(f, [40] * 3, measured_mm=[15] * 3) == pytest.approx([30, 30, 30])
+
+
+def test_closing_is_never_capped():
+    f = make(30, confirm=1, open_gap=9)
+    assert run(f, [4] * 6, measured_mm=[30] * 6) == pytest.approx([24, 18, 12, 6, 4, 4])
+
+
+def test_holding_the_cube_keeps_the_grip_and_can_still_open():
+    """Command 4 mm, fingers blocked by the cube at 11.4 mm: the 7.4 mm grip
+    gap stays; a steady request to open passes (it is behind the fingers)."""
+    f = make(4, open_gap=9)
+    assert run(f, [4] * 5, measured_mm=[11.4] * 5) == pytest.approx([4] * 5)
+    assert run(f, [16] * 4, measured_mm=[11.4] * 4) == pytest.approx([4, 4, 10, 16])
+
+
+def test_opening_cap_applies_to_the_human_too():
+    f = make(10, open_gap=9)
+    assert run(f, [40] * 3, human=[True] * 3, measured_mm=[10] * 3) == pytest.approx([16, 19, 19])
+
+
+def test_no_measurement_means_no_cap():
+    f = make(10, confirm=1, open_gap=9)
+    assert run(f, [40] * 3, measured_mm=[None, float("nan"), None]) == pytest.approx([16, 22, 28])
+
+
+# ----------------------------------------------------------------------------
 # Invariants under random input
 # ----------------------------------------------------------------------------
 
 @pytest.mark.parametrize("seed", range(20))
-def test_random_requests_respect_speed_and_range(seed):
+def test_random_requests_respect_speed_range_and_opening_cap(seed):
     rng = random.Random(seed)
-    f = make(rng.uniform(1, 40), confirm=rng.choice([1, 2, 3, 5]))
-    prev = f.command
+    gap = rng.choice([None, 3, 9])
+    f = make(rng.uniform(1, 40), confirm=rng.choice([1, 2, 3, 5]), open_gap=gap)
+    prev, fingers = f.command, f.command
     for _ in range(2000):
         kind = rng.random()
         w = (float("nan") if kind < 0.02 else rng.uniform(-20, 70) * MM if kind < 0.5
              else rng.choice([1, 4, 40, 60]) * MM)
-        c = f.step(w, human=rng.random() < 0.1)
+        c = f.step(w, human=rng.random() < 0.1, measured=fingers)
         assert abs(c - prev) <= STEP + EPS
         assert LIMITS[0] - EPS <= c <= LIMITS[1] + EPS
+        if gap is not None and c > prev + EPS:
+            assert c <= max(prev, fingers + gap * MM) + EPS
+        fingers += rng.uniform(0.2, 1.0) * (c - fingers)  # lagging fingers
         prev = c
 
 
@@ -239,6 +303,8 @@ def test_bad_parameters_are_refused():
         GripperFilter(max_step=0, confirm_ticks=3)
     with pytest.raises(ValueError):
         GripperFilter(max_step=0.006, confirm_ticks=0)
+    with pytest.raises(ValueError):
+        GripperFilter(max_step=0.006, confirm_ticks=3, open_gap=0)
 
 
 # ----------------------------------------------------------------------------
@@ -253,9 +319,10 @@ Q = [-0.27, 2.08, 1.50, -0.84, 0.006, -0.29, 0.0114]
 
 
 class _Follower:
-    def __init__(self, q, commanded_gripper=None):
+    def __init__(self, q, commanded_gripper=None, track=False):
         self.q = np.asarray(q, dtype=np.float32)
         self.commanded_gripper = commanded_gripper
+        self.track = track
         self.sent = []
 
     def get_state(self):
@@ -264,6 +331,8 @@ class _Follower:
 
     def move_to_joint_positions(self, arr, blocking=False, min_time_to_move=None):
         self.sent.append(np.asarray(arr, dtype=np.float32))
+        if self.track:  # fingers reach the sent width by the next read (no cube)
+            self.q[6] = self.sent[-1][6]
 
     def reset(self):
         pass
@@ -314,12 +383,12 @@ class _Leader:
         return np.asarray(Q[:6] + [self.gripper], dtype=np.float32)
 
 
-def _env(act_gripper, filter_cfg=GripperFilterConfig(), commanded_gripper=0.004):
+def _env(act_gripper, filter_cfg=GripperFilterConfig(), commanded_gripper=0.004, track=True):
     scaler = ActionScaler(torch.tensor(ACTION_MIN), torch.tensor(ACTION_MAX), ACTION_SCALE, min_range_per_dim=0.1)
     control = SimpleNamespace(gripper_closed=LIMITS[0], gripper_open=LIMITS[1], goal_time_s=0.05,
                               frequency_hz=100000, gripper_filter=filter_cfg)
     env = TrossenResidualEnv(
-        follower=_Follower(Q, commanded_gripper), cameras=_Cameras(), policy=_Policy(act_gripper), control=control,
+        follower=_Follower(Q, commanded_gripper, track), cameras=_Cameras(), policy=_Policy(act_gripper), control=control,
         reset_cfg=None, action_scaler=scaler,
         state_standardizer=StateStandardizer(torch.zeros(7), torch.ones(7)),
         image_keys=["observation.images.cam"], camera_resolution=(8, 8),
@@ -380,6 +449,17 @@ def test_env_hand_back_from_the_human_is_smooth_and_mirrored():
     assert [round(m / MM, 4) for m in env.intervention.mirrored] == pytest.approx(sent[6:])
 
 
+def test_env_opening_cap_uses_the_measured_fingers():
+    """Fingers stuck at the cube width (11.4 mm, track=False): ACT opens to 40 mm,
+    the command stops 9 mm ahead of the fingers."""
+    env, _ = _env(0.004, track=False)
+    env.step(_residual(0.0))
+    env.policy.gripper = 0.040
+    for _ in range(10):
+        env.step(_residual(0.0))
+    assert env.follower.sent[-1][6] == pytest.approx(0.0114 + 0.009, abs=1e-6)
+
+
 def test_env_without_gripper_filter_config_sends_the_request_unchanged():
     """Control objects without `gripper_filter` (older fakes) keep the old behaviour."""
     env, _ = _env(0.004, filter_cfg=None)
@@ -394,4 +474,4 @@ def test_station_config_has_the_filter():
     from trossen_real.config import load_station_config
 
     f = load_station_config("trossen_station3_single").control.gripper_filter
-    assert (f.max_step, f.confirm_ticks) == (0.006, 3)
+    assert (f.max_step, f.confirm_ticks, f.open_gap) == (0.006, 3, 0.009)

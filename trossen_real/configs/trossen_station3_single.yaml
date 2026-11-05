@@ -90,9 +90,16 @@ control:
   #   confirm_ticks  the policy's request must be on the same side of the
   #                  command this many ticks in a row (stops open/close flipping);
   #                  1 = speed limit only.
+  #   open_gap       m: while opening, the command may be at most this much wider
+  #                  than the measured fingers (the fingers lag the command and
+  #                  then overshoot: 44.009 mm fault, 2026-11-05 16:22). 9 mm: the
+  #                  demos reach the top with the command up to 9.6 mm ahead and
+  #                  never faulted. Set it from temp/gripper/gripper_overshoot_test.py
+  #                  on the robot. null = off. Closing is never capped (grip).
   gripper_filter:
     max_step: 0.006
     confirm_ticks: 3
+    open_gap: 0.009
 
 # Safety clip box applied to every commanded follower EE absolute position (meters,
 # base frame). Keep tight until verified safe on the real robot.
