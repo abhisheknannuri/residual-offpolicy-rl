@@ -67,6 +67,32 @@ control:
   # the fast per-tick goal_time above is tuned for small continuous teleop
   # deltas and overshoots the limit if used for a full open/close stroke.
   gripper_button_goal_time_s: 1.5
+  # How the policy's gripper width reaches the follower (infer app; the infer
+  # app's Connect panel can override `mode` per session). See GripperModeConfig
+  # in config.py.
+  #   raw    the width as the policy outputs it (before this option)
+  #   binary GripperController: open/closed vote + ramp, smooth intervention
+  #          hand-back. Required for checkpoints trained on binarized gripper
+  #          labels (Connect refuses raw for those); closed/open and the
+  #          thresholds must match the binarization (temp/dataset_prep/README.md).
+  gripper:
+    mode: raw
+    closed: 0.004
+    open: 0.040
+    close_below: 0.010
+    open_above: 0.016
+    confirm_ticks: 3
+    max_step: 0.003
+  # Speed limit + flip filter on the gripper width sent to the follower (RL env).
+  # See trossen_real/inference/gripper_filter.py.
+  #   max_step       m per tick, any source. 6 mm: just above the fastest gripper
+  #                  motion in the demos (5.9 mm/tick) and thin-ACT runs (5.2).
+  #   confirm_ticks  the policy's request must be on the same side of the
+  #                  command this many ticks in a row (stops open/close flipping);
+  #                  1 = speed limit only.
+  gripper_filter:
+    max_step: 0.006
+    confirm_ticks: 3
 
 # Safety clip box applied to every commanded follower EE absolute position (meters,
 # base frame). Keep tight until verified safe on the real robot.

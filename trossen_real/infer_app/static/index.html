@@ -22,6 +22,12 @@
       <option value="delta_joint">delta_joint</option>
     </select>
     <label><input id="force-action-space" type="checkbox" /> force (ignore mismatch warning)</label>
+    <label for="gripper-mode">Gripper</label>
+    <select id="gripper-mode">
+      <option value="">station config (control.gripper.mode)</option>
+      <option value="raw">raw: width as the policy outputs it</option>
+      <option value="binary">binary: open/closed controller (binarized-gripper checkpoints)</option>
+    </select>
     <label><input id="enable-intervention" type="checkbox" /> enable human intervention (leader + foot pedal)</label>
     <label><input id="enable-dataset-recording" type="checkbox" /> record dataset (foot pedal for reset/reward, no leader needed)</label>
 

@@ -243,3 +243,47 @@ Everything else is Station-1's values.
   directory on success, deleting the checkpoints and `online_buffer_final`.
 * After an online-RL session, carry the buffer forward with
   `scripts/promote_online_buffer.py` - see `docs/real/BUFFER_CACHES.md`.
+
+## Gripper filter (2026-11-05)
+
+**Why.** In the run of 2026-11-05 the residual's gripper output flipped between
+its limits from tick to tick (commanded 1 <-> 21 mm, up to 34 mm measured in one
+tick). One full-stroke open overshot the 40 mm target to 44.015 mm, past the
+controller's 44 mm limit, and the arm went idle. Clipping the target cannot
+prevent that: every command is "reach this width in `goal_time_s` = 0.125 s"
+(linear interpolation below 0.2 s), so a bigger jump is a faster move.
+
+**What.** `trossen_real/inference/gripper_filter.py` `GripperFilter`, applied in
+`TrossenResidualEnv.step()` to the final gripper width (ACT + residual, or the
+leader while intervening), before it is sent, mirrored to the leader or stored.
+The buffer therefore stores what was executed. Station config
+`control.gripper_filter`:
+
+| | | |
+|---|---|---|
+| `max_step` | 0.006 m | the command changes by at most this per tick, any source. Just above the fastest gripper motion in the demos (5.9 mm/tick) and the thin ACT's live runs (5.2) |
+| `confirm_ticks` | 3 | the policy's request must lie on the same side of the command this many ticks in a row before it moves (as GripperController). 1 = speed limit only |
+
+Effects: flipping of any size never moves the gripper and does not drift it; a
+steady change starts 2 ticks (0.1 s) late, then follows at <= 6 mm/tick; a full
+4 -> 40 mm stroke takes 6 ticks (0.3 s); after an intervention the policy must
+agree for 3 ticks before the gripper moves away from where the human left it.
+The filter starts each episode at the width the reset commanded.
+
+The action scale is independent of it: the scale sets how far the residual can
+move the gripper from ACT's width (0.3: +-19.5 mm, enough to release the cube
+from ACT's 4 mm hold), the filter how fast and how steadily it gets there.
+
+**Proof.**
+`.venv/bin/python -m pytest trossen_real/inference/tests/test_gripper_filter.py -v`
+(no robot): speed limit, clipping, flipping of 8.6-18 mm at every phase and
+pattern, no ratchet after a motion, no drift under exploration noise, steady
+requests and ramps, release while the residual flips, NaN, hand-back, 20 random
+fuzz runs (<= 6 mm/tick and inside the range always), and the env on fake
+hardware (reset start width, flipping residual, ACT release, hand-back + leader
+mirror, stored == sent). Replayed on the requests of the 14:17 session of
+2026-11-05: max jump 31.5 -> 6.0 mm, jumps over 6 mm 307 -> 0, reversals over
+1 mm 329 -> 2, episodes opening past 30 mm 14 -> 12.
+
+**Reading the log.** The env's `real_log_file` now has `gripper_requested` (the
+width before the filter) next to `executed_action[6]` (what was sent).

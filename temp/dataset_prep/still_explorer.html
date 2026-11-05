@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Still Frame Explorer</title>
+<!-- Page for still_explorer.py: holds no data, asks the Python server for it. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.27.0/plotly.min.js"></script>
+<style>
+:root{--bg:#fafaf8;--fg:#1d1d1b;--muted:#6b6b66;--card:#fff;--line:#e3e2dc;--accent:#2266cc}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#151515;--fg:#e8e8e4;--muted:#9a9a94;--card:#1f1f1f;--line:#333;--accent:#6ea0ff}}
+:root[data-theme="dark"]{--bg:#151515;--fg:#e8e8e4;--muted:#9a9a94;--card:#1f1f1f;--line:#333;--accent:#6ea0ff}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,sans-serif}
+header{padding:14px 16px;border-bottom:1px solid var(--line)}
+h1{font-size:18px;margin:0 0 4px}.muted{color:var(--muted);font-size:12px}
+main{display:grid;grid-template-columns:330px 1fr;gap:14px;padding:14px 16px}
+@media (max-width:900px){main{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px}
+label{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:5px 0;font-size:13px}
+input[type=number]{width:96px;padding:3px 5px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:4px}
+button,select{padding:4px 10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:4px;cursor:pointer}
+h2{font-size:14px;margin:12px 0 6px}
+.stat{font-variant-numeric:tabular-nums}
+table{border-collapse:collapse;width:100%;font-size:12px;font-variant-numeric:tabular-nums}
+td,th{padding:2px 4px;border-bottom:1px solid var(--line);text-align:right}th{color:var(--muted);font-weight:500}
+tr.sel{background:color-mix(in srgb,var(--accent) 15%,transparent)}tr{cursor:pointer}
+.legend span{display:inline-block;width:11px;height:11px;border-radius:2px;margin:0 4px 0 10px;vertical-align:-1px}
+#vizlink a{color:var(--accent)}
+</style></head><body>
+<header><h1>Still frame explorer</h1>
+<div class="muted" id="src"></div>
+<div class="muted">Speed = change of the measured joint position from one frame to the next, |q[t+1] - q[t]| in rad/frame (x20 = rad/s). Hover shows the position too.</div>
+<div class="legend muted"><span style="background:#bdbdbd"></span>still, run too short
+<span style="background:#7fb2ff"></span>still, kept (head/tail)<span style="background:#e4572e"></span>dropped
+<span style="background:#4caf50"></span>protected (near a gripper switch)<span style="background:#f08c1e"></span>3 s before an open (strip at the top)</div></header>
+<main>
+<section>
+<div class="card">
+<h2 style="margin-top:0">Thresholds (rad/frame)</h2>
+<label><span><input type="checkbox" id="same" checked> same value for all joints</span></label>
+<div id="thr"></div>
+<label>gripper (mm/frame)<input type="number" id="grip" step="0.05"></label>
+<h2>Runs (frames, 20 Hz)</h2>
+<label>min_run<input type="number" id="min_run" step="1" min="1"></label>
+<label>keep_head<input type="number" id="keep_head" step="1" min="0"></label>
+<label>keep_tail<input type="number" id="keep_tail" step="1" min="0"></label>
+<label>protect (+- frames)<input type="number" id="protect" step="1" min="0"></label>
+<button id="reset">defaults</button>
+<h2>Whole dataset</h2>
+<div id="totals" class="stat">loading...</div>
+</div>
+<div class="card" style="margin-top:14px">
+<h2 style="margin-top:0">Episodes (click to show)</h2>
+<label>sort<select id="sort"><option value="drop">most dropped</option><option value="pre">most dropped before an open</option><option value="ep">episode</option></select></label>
+<div style="max-height:420px;overflow:auto"><table id="eptab"></table></div>
+</div>
+</section>
+<section>
+<div class="card"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+<button id="prev">&larr;</button><b id="eptitle"></b><button id="next">&rarr;</button>
+<span class="muted" id="epstat"></span><span id="vizlink"></span></div>
+<div id="epplot" style="height:980px"></div></div>
+<div class="card" style="margin-top:14px"><h2 style="margin-top:0">Speed histograms per joint: every frame of the dataset vs the last <span id="pres"></span> s before each gripper open</h2>
+<div class="muted">Frames left of the threshold line count as still for that joint. Orange = the precise alignment / insertion part: a threshold to the right of most orange bars would call that motion still.</div>
+<div id="hist" style="height:620px"></div></div>
+</section></main>
+<script>
+let M, H, R, stats = [], cur = 0;
+const J = 6;
+const post = (url, body) => fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)}).then(r => r.json());
+const fg = () => getComputedStyle(document.body).color;
+
+async function init() {
+  M = await (await fetch('/api/meta')).json();
+  H = await (await fetch('/api/hist')).json();
+  R = JSON.parse(JSON.stringify(M.rule));
+  document.getElementById('src').textContent = M.dataset + '  |  ' + M.episodes.length + ' episodes';
+  document.getElementById('pres').textContent = M.pre_open_s;
+  const thr = document.getElementById('thr');
+  M.joints.slice(0, J).forEach((n, j) => thr.insertAdjacentHTML('beforeend', `<label>${n}<input type="number" id="thr${j}" step="0.0001" min="0"></label>`));
+  document.querySelectorAll('input').forEach(i => i.addEventListener('change', read));
+  document.getElementById('reset').onclick = () => { R = JSON.parse(JSON.stringify(M.rule)); fill(); update(); };
+  document.getElementById('sort').onchange = table;
+  document.getElementById('prev').onclick = () => { cur = (cur - 1 + M.episodes.length) % M.episodes.length; draw(); table(); };
+  document.getElementById('next').onclick = () => { cur = (cur + 1) % M.episodes.length; draw(); table(); };
+  fill(); update();
+}
+function fill() {
+  for (let j = 0; j < J; j++) document.getElementById('thr' + j).value = R.joint_thr[j];
+  document.getElementById('grip').value = (R.grip_thr * 1000).toFixed(2);
+  for (const k of ['min_run', 'keep_head', 'keep_tail', 'protect']) document.getElementById(k).value = R[k];
+}
+function read(ev) {
+  if (document.getElementById('same').checked && ev.target.id.startsWith('thr')) R.joint_thr = R.joint_thr.map(() => +ev.target.value);
+  else for (let j = 0; j < J; j++) R.joint_thr[j] = +document.getElementById('thr' + j).value;
+  R.grip_thr = +document.getElementById('grip').value / 1000;
+  for (const k of ['min_run', 'keep_head', 'keep_tail', 'protect']) R[k] = Math.max(0, Math.round(+document.getElementById(k).value));
+  fill(); update();
+}
+async function update() {
+  document.getElementById('totals').textContent = 'computing...';
+  const t = await post('/api/totals', R);
+  stats = t.episodes;
+  const pct = (a, b) => (100 * a / Math.max(b, 1)).toFixed(1) + '%';
+  document.getElementById('totals').innerHTML =
+    `frames ${t.frames.toLocaleString()}<br>still ${t.still.toLocaleString()} (${pct(t.still, t.frames)})<br>` +
+    `<b>dropped ${t.dropped.toLocaleString()} (${pct(t.dropped, t.frames)})</b>, protected ${t.protected.toLocaleString()}<br>` +
+    `dropped in the ${M.pre_open_s} s before an open: ${t.dropped_pre.toLocaleString()} (${pct(t.dropped_pre, t.pre_frames)} of those frames)<br>` +
+    `frames left: ${(t.frames - t.dropped).toLocaleString()}`;
+  table(); draw(); hist();
+}
+function table() {
+  const k = document.getElementById('sort').value;
+  const s = [...stats].sort((a, b) => k === 'ep' ? a.ep - b.ep : k === 'pre' ? b.dp - a.dp : b.d - a.d);
+  document.getElementById('eptab').innerHTML = '<tr><th>ep</th><th>frames</th><th>dropped</th><th>before open</th></tr>' +
+    s.map(r => `<tr data-i="${r.i}" class="${r.i === cur ? 'sel' : ''}"><td>${r.ep}</td><td>${r.T}</td><td>${r.d}</td><td>${r.dp}</td></tr>`).join('');
+  document.querySelectorAll('#eptab tr[data-i]').forEach(tr => tr.onclick = () => { cur = +tr.dataset.i; draw(); table(); });
+}
+
+const COL = {1: 'rgba(160,160,160,0.25)', 2: 'rgba(80,140,255,0.25)', 3: 'rgba(228,87,46,0.35)', 4: 'rgba(76,175,80,0.35)'};
+async function draw() {
+  const i = cur, e = await post('/api/episode', {i, rule: R});
+  if (i !== cur) return;
+  const c = e.code, T = c.length, x = [...Array(T).keys()].map(t => t / M.fps), st = stats[i] || {d: 0, dp: 0}, N = 7, rows = N + 1;
+  document.getElementById('eptitle').textContent = 'episode ' + e.ep;
+  document.getElementById('epstat').textContent = `${T} frames, dropped ${st.d} (${(100 * st.d / T).toFixed(1)}%), before an open ${st.dp}`;
+  const traces = [], shapes = [];
+  for (let j = 0; j < N; j++) {
+    const ax = j === 0 ? '' : String(j + 1), unit = j < J ? 'rad' : 'm';
+    traces.push({x, y: e.sp[j].map(v => Math.max(v, 1e-6)), customdata: e.q[j], xaxis: 'x' + ax, yaxis: 'y' + ax, mode: 'lines',
+                 line: {width: 1, color: '#555'}, showlegend: false,
+                 hovertemplate: `${M.joints[j]}: speed %{y:.5f} ${unit}/frame, position %{customdata:.4f} ${unit}<extra></extra>`});
+    const th = j < J ? R.joint_thr[j] : R.grip_thr;
+    shapes.push({type: 'line', xref: 'x' + ax, yref: 'y' + ax, x0: 0, x1: x[T - 1], y0: th, y1: th, line: {color: '#e4572e', width: 1, dash: 'dot'}});
+  }
+  const ax = String(rows);
+  traces.push({x, y: e.q[6].map(v => v * 1000), xaxis: 'x' + ax, yaxis: 'y' + ax, mode: 'lines', line: {color: '#2a9d5c', width: 1.2}, name: 'gripper measured (mm)'});
+  traces.push({x, y: e.lab.map(v => v * 1000), xaxis: 'x' + ax, yaxis: 'y' + ax, mode: 'lines', line: {color: '#2266cc', width: 2, shape: 'hv'}, name: 'gripper label (mm)'});
+  const segs = (arr, f) => { let s = 0; for (let t = 1; t <= T; t++) if (t === T || arr[t] !== arr[s]) { if (arr[s]) f(s, t, arr[s]); s = t; } };
+  segs(c, (s, t, v) => shapes.push({type: 'rect', xref: 'x', yref: 'paper', x0: x[s], x1: t < T ? x[t] : x[T - 1], y0: 0, y1: 0.985, fillcolor: COL[v], line: {width: 0}, layer: 'below'}));
+  segs(e.in_pre, (s, t) => shapes.push({type: 'rect', xref: 'x', yref: 'paper', x0: x[s], x1: t < T ? x[t] : x[T - 1], y0: 0.99, y1: 1, fillcolor: '#f08c1e', line: {width: 0}}));
+  const layout = {grid: {rows, columns: 1, pattern: 'coupled'}, shapes, margin: {l: 70, r: 10, t: 10, b: 40}, hovermode: 'x unified',
+                  paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: {color: fg(), size: 11}, legend: {orientation: 'h', y: -0.04}};
+  for (let j = 0; j < rows; j++) {
+    const k = j === 0 ? '' : String(j + 1);
+    layout['yaxis' + k] = j < N ? {type: 'log', range: [-6, -1], title: {text: M.joints[j] + ' speed', font: {size: 10}}, gridcolor: 'rgba(128,128,128,0.15)'}
+                                : {title: {text: 'gripper mm', font: {size: 10}}, gridcolor: 'rgba(128,128,128,0.15)'};
+    layout['xaxis' + k] = {showticklabels: j === rows - 1, gridcolor: 'rgba(128,128,128,0.15)'};
+  }
+  layout['xaxis' + rows].title = {text: 's'};
+  await Plotly.react('epplot', traces, layout, {responsive: true});
+  const el = document.getElementById('epplot');
+  el.removeAllListeners('plotly_click');
+  el.on('plotly_click', ev => {
+    const sec = ev.points[0].x;
+    document.getElementById('vizlink').innerHTML = M.viz
+      ? `<a target="_blank" href="${M.viz}/episode_${e.ep}?t=${Math.floor(sec)}">open episode ${e.ep} at ${sec.toFixed(1)} s in the visualizer</a>`
+      : `episode ${e.ep} at ${sec.toFixed(2)} s`;
+  });
+}
+
+function hist() {
+  const mid = H.bins.slice(0, -1).map((b, i) => Math.sqrt(b * H.bins[i + 1]));
+  const traces = [], shapes = [], annotations = [];
+  const layout = {grid: {rows: 4, columns: 2, pattern: 'independent'}, margin: {l: 50, r: 10, t: 24, b: 30}, barmode: 'overlay',
+                  paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: {color: fg(), size: 10}, legend: {orientation: 'h', y: -0.06}};
+  for (let j = 0; j < 7; j++) {
+    const k = j === 0 ? '' : String(j + 1);
+    const nA = H.h_all[j].reduce((a, b) => a + b, 0), nP = Math.max(1, H.h_pre[j].reduce((a, b) => a + b, 0));
+    traces.push({x: mid, y: H.h_all[j].map(v => v / nA), type: 'bar', xaxis: 'x' + k, yaxis: 'y' + k, marker: {color: 'rgba(120,120,120,0.55)'}, name: 'every frame', showlegend: j === 0});
+    traces.push({x: mid, y: H.h_pre[j].map(v => v / nP), type: 'bar', xaxis: 'x' + k, yaxis: 'y' + k, marker: {color: 'rgba(240,140,30,0.6)'}, name: `last ${M.pre_open_s} s before an open`, showlegend: j === 0});
+    const th = j < J ? R.joint_thr[j] : R.grip_thr;
+    shapes.push({type: 'line', xref: 'x' + k, yref: 'y' + k + ' domain', x0: th, x1: th, y0: 0, y1: 1, line: {color: '#e4572e', width: 1.5}});
+    layout['xaxis' + k] = {type: 'log', gridcolor: 'rgba(128,128,128,0.15)'};
+    layout['yaxis' + k] = {gridcolor: 'rgba(128,128,128,0.15)', title: {text: 'share', font: {size: 9}}};
+    annotations.push({text: M.joints[j] + (j < J ? ' speed (rad/frame)' : ' speed (m/frame)'), xref: 'x' + k + ' domain', yref: 'y' + k + ' domain', x: 0, y: 1.12, showarrow: false, xanchor: 'left', font: {size: 11}});
+  }
+  layout.shapes = shapes; layout.annotations = annotations;
+  Plotly.react('hist', traces, layout, {responsive: true});
+}
+init();
+</script></body></html>

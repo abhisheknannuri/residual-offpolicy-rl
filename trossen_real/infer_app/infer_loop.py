@@ -69,6 +69,7 @@ from trossen_real.cameras.camera_manager import CameraManager
 from trossen_real.config import ControlConfig
 from trossen_real.human_intervention.episode_boundary import EpisodeBoundaryMonitor
 from trossen_real.infer_app.video_recorder import InferVideoRecorder
+from trossen_real.inference.gripper_controller import GripperController
 from trossen_real.inference.intervention import InterventionManager
 from trossen_real.inference.policy_client import PolicyClient, TickLogger, build_observation, reconstruct_absolute_action
 from trossen_real.inference.stage_detector import StageDetector
@@ -117,6 +118,7 @@ class InferenceLoop:
         image_encoding: str = "raw",
         jpeg_quality: int = 95,
         stage_detector: StageDetector | None = None,
+        gripper: GripperController | None = None,
     ) -> None:
         self.follower = follower
         self.cameras = cameras
@@ -135,6 +137,10 @@ class InferenceLoop:
         # Optional SARM stage/success detection (stage_detector.py). None = off,
         # behaviour exactly as before.
         self.stage_detector = stage_detector
+        # control.gripper.mode "binary": the policy's (and while intervened the
+        # leader's) gripper width goes through this controller. None = "raw",
+        # the width is sent as before.
+        self.gripper = gripper
         self._thread: threading.Thread | None = None
         self._stop_requested = False
         self._lock = threading.Lock()
@@ -257,6 +263,11 @@ class InferenceLoop:
 
             logger.info("Resetting policy's internal action-chunk queue (fresh rollout)...")
             self.policy.reset()
+            if self.gripper is not None:
+                # Start from the commanded width (stage-2 reset: the close on the cube, not
+                # the measured cube width), so the first tick does not move the gripper.
+                start = leader_sync_joints(self.follower, self.follower.get_state()["q"])[6]
+                self.gripper.reset(float(start))
             if self.stage_detector is not None:
                 self.stage_detector.start_episode()
 
@@ -319,9 +330,14 @@ class InferenceLoop:
                 )
 
                 if intervened_now:
-                    action = self.intervention.get_leader_action()
+                    action = np.array(self.intervention.get_leader_action(), dtype=np.float64)
+                    if self.gripper is not None:
+                        action[6] = self.gripper.step(float(policy_action[6]), float(action[6]))
                 else:
                     action = policy_action
+                    if self.gripper is not None:
+                        action = np.array(policy_action, dtype=np.float64)
+                        action[6] = self.gripper.step(float(policy_action[6]))
                     if self.intervention is not None:
                         self.intervention.mirror_to_leader(action, self.control.goal_time_s)
 
@@ -431,6 +447,8 @@ class InferenceLoop:
                         reconstructed_action=action,
                         achieved_hz=achieved_hz,
                         intervened=intervened_now,
+                        **({"gripper_policy": float(policy_action[6]), "gripper_cmd": float(action[6]),
+                            "gripper_open": self.gripper.is_open} if self.gripper is not None else {}),
                     )
             if stop_reason is None:
                 # Loop ended without a pedal trigger - either max_steps was reached, or

@@ -66,6 +66,7 @@ from trossen_real.cameras.camera_manager import CameraManager
 from trossen_real.config import ControlConfig, ResetConfig
 from trossen_real.human_intervention.episode_boundary import EpisodeBoundaryMonitor
 from trossen_real.human_intervention.pedal_listener import PedalListener
+from trossen_real.inference.gripper_filter import GripperFilter
 from trossen_real.inference.intervention import InterventionManager
 from trossen_real.inference.policy_client import (
     PolicyClient,
@@ -162,6 +163,17 @@ class TrossenResidualEnv:
         # infer_app) - self-disabling on write failure, never risks crashing the control loop.
         self.tick_logger = TickLogger(log_file) if log_file else None
 
+        # Speed limit + flip filter on the gripper width sent to the follower
+        # (station config control.gripper_filter, trossen_real/inference/gripper_filter.py).
+        # Applied in step() to the final width, policy or human, BEFORE it is sent,
+        # mirrored to the leader or stored, so the buffer holds what was executed.
+        # A control object without `gripper_filter` (test fakes) means no filter.
+        gf = getattr(control, "gripper_filter", None)
+        self.gripper_filter = (
+            GripperFilter(gf.max_step, gf.confirm_ticks, (control.gripper_closed, control.gripper_open))
+            if gf is not None else None
+        )
+
         self.intervention: InterventionManager | None = None
         if leader is not None and pedal is not None:
             self.intervention = InterventionManager(leader, pedal, policy)
@@ -241,13 +253,15 @@ class TrossenResidualEnv:
             self.episode_monitor.start_episode()
 
         self.follower.reset()
-        if self.intervention is not None:
-            follower_state = self.follower.get_state()
+        if self.intervention is not None or self.gripper_filter is not None:
             # Stage-2 reset: gripper at the commanded close on the cube, not the
             # measured cube width (see stage2_reset.leader_sync_joints).
-            self.intervention.sync_to_follower(
-                leader_sync_joints(self.follower, follower_state["q"]), goal_time=self.reset_cfg.goal_time_s
-            )
+            sync_q = leader_sync_joints(self.follower, self.follower.get_state()["q"])
+            if self.intervention is not None:
+                self.intervention.sync_to_follower(sync_q, goal_time=self.reset_cfg.goal_time_s)
+            if self.gripper_filter is not None:
+                # The filter starts from the width the reset commanded.
+                self.gripper_filter.reset(sync_q[6])
 
         # Settle before taking the first observation / resetting the policy's
         # action-chunk queue - mirrors infer_app/infer_loop.py's proven
@@ -353,20 +367,22 @@ class TrossenResidualEnv:
             # position by at most `action_scaler.limits` per tick rather than snapping to it -
             # if the human moves fast, the follower visibly lags and catches up over the next
             # few ticks instead of lurching.
-            stored_naction = self._to_stored_naction(executed_action, follower_state_before)
         else:
             env_action = self.action_scaler.unscale(combined_naction).squeeze(0).detach().cpu().numpy()
             executed_action = reconstruct_absolute_action(
                 self.action_space_name, env_action, follower_state_before,
                 gripper_bounds=(self.control.gripper_closed, self.control.gripper_open),
             )
-            # Store what was EXECUTED, not what was proposed: reconstruct_absolute_action()
-            # clips the gripper to [gripper_closed, gripper_open], which combined_naction
-            # alone does not guarantee. Joints 0-5 come back identical up to float error.
-            # Same conversion the intervention branch uses.
-            stored_naction = self._to_stored_naction(executed_action, follower_state_before)
-            if self.intervention is not None:
-                self.intervention.mirror_to_leader(executed_action, self.control.goal_time_s)
+        gripper_requested = float(executed_action[6])
+        if self.gripper_filter is not None:
+            executed_action[6] = self.gripper_filter.step(gripper_requested, human=intervened_now)
+        # Store what was EXECUTED, not what was proposed: reconstruct_absolute_action()
+        # clips the gripper to [gripper_closed, gripper_open], and the gripper filter
+        # may hold or slow it, neither of which combined_naction shows. Joints 0-5 come
+        # back identical up to float error. Same conversion for both branches.
+        stored_naction = self._to_stored_naction(executed_action, follower_state_before)
+        if not intervened_now and self.intervention is not None:
+            self.intervention.mirror_to_leader(executed_action, self.control.goal_time_s)
 
         self.follower.move_to_joint_positions(
             executed_action, blocking=False, min_time_to_move=self.control.goal_time_s
@@ -494,6 +510,9 @@ class TrossenResidualEnv:
                 sarm_success=sarm.success if sarm is not None else None,
                 sarm_error=sarm.error if sarm is not None else None,
                 executed_action=np.asarray(executed_action, dtype=np.float32),
+                # The gripper width asked for (ACT + residual, or the leader) before the
+                # gripper filter; executed_action[6] is what was sent.
+                gripper_requested=gripper_requested,
                 stored_naction=stored_naction.detach().cpu().numpy(),
                 actor_proposed_action=combined_naction.detach().cpu().numpy(),
                 residual_naction=residual_naction.detach().cpu().numpy(),

@@ -3,6 +3,7 @@ const els = {
   policyUrl: document.getElementById("policy-url"),
   actionSpace: document.getElementById("action-space"),
   forceActionSpace: document.getElementById("force-action-space"),
+  gripperMode: document.getElementById("gripper-mode"),
   enableIntervention: document.getElementById("enable-intervention"),
   enableDatasetRecording: document.getElementById("enable-dataset-recording"),
   residualCheckpoint: document.getElementById("residual-checkpoint"),
@@ -120,6 +121,7 @@ async function connect() {
         policy_server_url: els.policyUrl.value.trim(),
         action_space: els.actionSpace.value,
         force_action_space: els.forceActionSpace.checked,
+        gripper_mode: els.gripperMode.value,  // "" = the station config's control.gripper.mode
         enable_intervention: els.enableIntervention.checked,
         enable_dataset_recording: els.enableDatasetRecording.checked,
         // Residual RL: only sent when a checkpoint path is filled in, so an
@@ -280,6 +282,13 @@ async function poll() {
       `<span class="dot ok"></span> Policy: ${ph.checkpoint || "?"} ` +
       `(device=${ph.device}, chunk_size=${ph.chunk_size}, n_action_steps=${ph.n_action_steps}, ` +
       `action_space=${h.action_space}, likely_action_space=${ph.likely_action_space ?? "unknown"})`;
+    if (h.gripper) {
+      const g = h.gripper;
+      const ck = g.checkpoint_binarized === null ? "unknown" : g.checkpoint_binarized ? "binarized" : "recorded widths";
+      els.policyStatus.innerHTML +=
+        `<div class="status-row"><span class="dot ${g.warning ? "bad" : "ok"}"></span>Gripper: <b>${g.mode}</b> ` +
+        `(from ${g.source}; checkpoint gripper labels: ${ck})${g.warning ? " - " + g.warning : ""}</div>`;
+    }
 
     const camLines = Object.entries(h.camera_details || {}).map(([name, d]) => {
       const cls = d.is_mock ? "bad" : d.healthy ? "ok" : "bad";

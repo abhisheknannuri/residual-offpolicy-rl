@@ -53,6 +53,7 @@ from trossen_real.infer_app.eval_config import (
 from trossen_real.infer_app.eval_session import EvalSession, EvalSessionError
 from trossen_real.infer_app.eval_writer import EvalWriter
 from trossen_real.infer_app.infer_loop import InferenceLoop
+from trossen_real.inference.gripper_controller import gripper_from_config
 from trossen_real.inference.intervention import InterventionManager
 from trossen_real.inference.stage_detector import StageDetector
 from trossen_real.rl.stage2_reset import CubeConfirm, make_follower
@@ -110,6 +111,9 @@ class AppState:
         # Stage-2 reset (station config reset.single.mode = stage2_*): the reset
         # waits on this until the UI's "Cube placed" button (/api/cube_placed).
         self.cube_confirm = CubeConfirm()
+        # control.gripper: the mode this session runs (raw / binary) and the
+        # checkpoint check, for the UI. See _gripper_setup().
+        self.gripper_info: dict | None = None
 
     @property
     def connected(self) -> bool:
@@ -403,6 +407,16 @@ def api_connect():
             elif mismatch:
                 logger.warning("Proceeding despite action_space mismatch (force_action_space=true): %s", mismatch)
 
+            try:
+                gripper, gripper_info = gripper_from_config(config.control, body.get("gripper_mode"),
+                                                            policy_health.get("action_stats"))
+            except ValueError as exc:
+                follower.disconnect()
+                return jsonify(error=str(exc)), 400
+            logger.info("Gripper: %s", gripper_info)
+            if gripper_info["warning"]:
+                logger.warning("Gripper: %s", gripper_info["warning"])
+
             # SARM stage detector: opt-in via the station config, and REQUIRED to work
             # when enabled (fails the connect, like the leader), so a run is never
             # silently missing stage labels.
@@ -504,6 +518,7 @@ def api_connect():
                 image_encoding=image_encoding,
                 jpeg_quality=jpeg_quality,
                 stage_detector=stage_detector,
+                gripper=gripper,
             )
 
             state.config = config
@@ -519,6 +534,7 @@ def api_connect():
             state.episode_monitor = episode_monitor
             state.dataset_recording_enabled = enable_dataset_recording
             state.stage_detector = stage_detector
+            state.gripper_info = gripper_info
 
             if eval_config is not None:
                 eval_root = str(EVAL_DIR) if EVAL_DIR is not None else eval_config.output_root
@@ -563,6 +579,7 @@ def api_connect():
         # None when no residual checkpoint was given, so the UI can say plainly
         # whether RL is in the loop rather than leaving it to be inferred.
         residual=getattr(state.policy, "meta", None),
+        gripper=state.gripper_info,
     )
 
 
@@ -655,6 +672,7 @@ def api_disconnect():
         if state.stage_detector is not None:
             state.stage_detector.close()
         state.stage_detector = None
+        state.gripper_info = None
         state.eval = None
         state.eval_writer = None
     return jsonify(status="ok")
@@ -724,6 +742,7 @@ def api_health():
         stage_detector=_stage_detector_state(),
         reset_mode=state.config.reset["single"].mode,
         waiting_for_cube=state.cube_confirm.waiting,
+        gripper=state.gripper_info,
         **{"eval": eval_state},
     )
 

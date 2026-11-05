@@ -47,6 +47,50 @@ class CamerasConfig:
     devices: list[CameraDevice] = field(default_factory=list)
 
 
+GRIPPER_MODES = ("raw", "binary")
+
+
+@dataclass
+class GripperModeConfig:
+    """`control.gripper` in the station config: how the policy's gripper width
+    reaches the follower (infer app; the RL env later).
+
+    raw    the absolute width as the policy outputs it, clipped to
+           gripper_closed/gripper_open (the behaviour before this option)
+    binary trossen_real/inference/gripper_controller.py GripperController: the
+           width is a vote (open above `open_above`, closed below `close_below`,
+           `confirm_ticks` in a row), the command ramps to `open`/`closed` at
+           `max_step` per tick, and an intervention hands back without a snap.
+           Needed for a checkpoint trained on binarized gripper labels
+           (temp/gripper/binarize_gripper_dataset.py); `closed`/`open` and the
+           thresholds must match that binarization.
+    The infer app's Connect panel can override `mode` per session.
+    """
+
+    mode: str = "raw"
+    closed: float = 0.004  # m, the label widths
+    open: float = 0.040
+    close_below: float = 0.010
+    open_above: float = 0.016
+    confirm_ticks: int = 3
+    max_step: float = 0.003  # m per tick
+
+
+@dataclass
+class GripperFilterConfig:
+    """`control.gripper_filter` in the station config: the speed limit and flip
+    filter on the gripper width sent to the follower, see
+    trossen_real/inference/gripper_filter.py GripperFilter. Used by the RL env.
+
+    max_step       m per tick the gripper command may change (any source)
+    confirm_ticks  the policy's request must lie on the same side of the
+                   command this many ticks in a row before it moves; 1 = off
+    """
+
+    max_step: float = 0.006
+    confirm_ticks: int = 3
+
+
 @dataclass
 class ControlConfig:
     frequency_hz: int = 20
@@ -147,6 +191,12 @@ class ControlConfig:
     # teleop if the leader/follower joints aren't already closely synced
     # (`sync_to_joints()` at reset should normally prevent this).
     joint_max_relative_target: float = 0.5
+    # How the policy's gripper width reaches the follower (`control.gripper:` in
+    # the YAML), see GripperModeConfig.
+    gripper: GripperModeConfig = field(default_factory=lambda: GripperModeConfig())
+    # Speed limit + flip filter on the gripper command (`control.gripper_filter:`),
+    # see GripperFilterConfig.
+    gripper_filter: GripperFilterConfig = field(default_factory=lambda: GripperFilterConfig())
 
     @property
     def goal_time_s(self) -> float:
@@ -376,7 +426,16 @@ def load_station_config(name_or_path: str) -> StationConfig:
                     f"x_min < x_max and y_min < y_max."
                 )
 
-    control = ControlConfig(**raw.get("control", {}))
+    control_raw = dict(raw.get("control") or {})
+    gripper = GripperModeConfig(**(control_raw.pop("gripper", None) or {}))
+    gripper_filter = GripperFilterConfig(**(control_raw.pop("gripper_filter", None) or {}))
+    control = ControlConfig(**control_raw, gripper=gripper, gripper_filter=gripper_filter)
+    if not (gripper_filter.max_step > 0 and gripper_filter.confirm_ticks >= 1):
+        raise ValueError(f"control.gripper_filter needs max_step > 0 and confirm_ticks >= 1 in {path}")
+    if gripper.mode not in GRIPPER_MODES:
+        raise ValueError(f"control.gripper.mode must be one of {GRIPPER_MODES}, got '{gripper.mode}' in {path}")
+    if not (gripper.closed < gripper.close_below < gripper.open_above < gripper.open):
+        raise ValueError(f"control.gripper needs closed < close_below < open_above < open in {path}")
     if control.control_mode not in ("delta", "absolute"):
         raise ValueError(
             f"control.control_mode must be 'delta' or 'absolute', got '{control.control_mode}' in {path}"
