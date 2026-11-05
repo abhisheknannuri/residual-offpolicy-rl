@@ -79,7 +79,10 @@ algo:
   # exploration noise during warm-up, per joint. Mirrors action_scale
   # so warm-up stays inside the residual range the actor can produce.
   # 2026-10-26: 0.05 everywhere (was [0.15,0.15,0.15,0.05,0.05,0.05,0.1], from sim).
-  random_action_noise_scale: [0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05]    # HASHED (online)
+  # 2026-11-05: = the new action_scale. Uniform in +-scale, drawn fresh every
+  # step (train_residual_td3.py:1591): on the gripper +-19.5 mm per tick around
+  # ACT's ~4 mm hold, the cube is 11.4 mm wide.
+  random_action_noise_scale: [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.3]    # HASHED (online)
   sampling_strategy: uniform    # HASHED (both)
   prefetch_batches: 4
   priority_alpha: 0.6
@@ -103,8 +106,10 @@ algo:
   # 2026-10-26: 0.015 everywhere = 30% of the 0.05 residual cap on every dim
   # (was [0.015,0.015,0.015,0.03,0.03,0.03,0.0125]: 60% of the cap on the wrist,
   # i.e. more than the wrist's own typical per-step motion in the data).
-  stddev_max: [0.015, 0.015, 0.015, 0.015, 0.015, 0.015, 0.015]
-  stddev_min: [0.015, 0.015, 0.015, 0.015, 0.015, 0.015, 0.015]
+  # 2026-11-05: 0.02 everywhere, with action_scale 0.1 / 0.3 (gripper): 20% of the
+  # joint caps, 7% of the gripper cap; real units ~0.0022 rad shoulder, ~1.3 mm gripper.
+  stddev_max: [0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02]
+  stddev_min: [0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02]
   stddev_step: 300000
   # Built from the three keys above, resolved AFTER all yaml/CLI merging.
   # Leave it as this interpolation and edit stddev_max/min/step instead. Only
@@ -198,7 +203,11 @@ agent:
     # at most ~2.6 mm (stays below the cube width, so the grip holds).
     # NOT part of the buffer cache keys: changing it on the same dataset reuses
     # a buffer normalized with the old value.
-    action_scale: [0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05]
+    # 2026-11-05 (base ACT = thin-only checkpoint, wandb.name stage2_thinACT):
+    # joints 0.1 (cap base 0.007, shoulder/elbow 0.014, wrist 0.008-0.013 rad/step,
+    # about the demos' p90 speed), gripper 0.3 (cap 19.5 mm: the target can reach
+    # ~23.5 mm from ACT's 4 mm hold, past the 11.4 mm cube, so it can release).
+    action_scale: [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.3]
     num_layers: 2
     use_layer_norm: true
   critic_grad_clip_norm: 1.0
@@ -253,7 +262,11 @@ wandb:
   entity: null
   notes: null
   continue_run_id: null
-  name: null    # HASHED (both)
+  # 2026-11-05: set so the buffers are rebuilt for the new base ACT
+  # (ACT_BC_PickCubeAndInsert_TS3_Iter1_withRecovery_deltajoint_thin 070000,
+  # policy server --n-action-steps 20). The ACT checkpoint is in neither cache
+  # hash: without a new name the old buffers (050000 base actions) are reused.
+  name: stage2_thinACT    # HASHED (both)
   group: null
 log_freq: 100
 eval_interval_every_steps: 999999999
@@ -293,7 +306,7 @@ enable_intervention: true
 # Or set it here:
 #     real_log_file: /home/qte9489/personal_abhi/temp/residual-offpolicy-rl/RealTrainLogs/station3_online_2026-10-12_run1.jsonl
 # null = no log.
-real_log_file: /home/qte9489/personal_abhi/temp/residual-offpolicy-rl/RealTrainLogs/station3_online_2026-10-26_run1.jsonl
+real_log_file: /home/qte9489/personal_abhi/temp/residual-offpolicy-rl/RealTrainLogs/station3_online_2026-11-05_run1.jsonl
 
 # --- how we talk to policy_server.py -----------------------------------------
 # These apply EVERYWHERE the base policy is queried - the offline buffer build,
