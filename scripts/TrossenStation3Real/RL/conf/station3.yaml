@@ -82,7 +82,7 @@ algo:
   # 2026-11-05: = the new action_scale. Uniform in +-scale, drawn fresh every
   # step (train_residual_td3.py:1591): on the gripper +-19.5 mm per tick around
   # ACT's ~4 mm hold, the cube is 11.4 mm wide.
-  random_action_noise_scale: [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.3]    # HASHED (online)
+  random_action_noise_scale: [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]    # HASHED (online)
   sampling_strategy: uniform    # HASHED (both)
   prefetch_batches: 4
   priority_alpha: 0.6
